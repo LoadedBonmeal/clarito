@@ -249,50 +249,53 @@ pub fn deducere_plafonata(entered: Decimal, brut: Decimal, year: i32, month: u32
     }
 }
 
-/// Deducerea personală lunară (art. 77 alin. (1) Cod fiscal) din TABELUL ANAF 2026 (Ordinul ANAF
-/// nr. 4/2024, aplicabil în 2026 conform OG 16/2022). Calculată pe baza venitului brut realizat și a
-/// numărului de persoane în întreținere (0–4, ≥4 = 4 coloane). Returnează suma lunară în lei (Decimal).
+/// Deducerea personală de bază lunară (art. 77 alin. (1)-(3) Cod fiscal, forma post-reformă 2023 —
+/// Legea 34/2023). Calculată pe baza venitului brut lunar din salarii și a numărului de persoane în
+/// întreținere (0/1/2/3/≥4). Returnează suma lunară în lei (Decimal, rotunjită la leu întreg).
 ///
-/// Plafon art. 77 alin. (2): dacă brut > salariul_minim + 2.000 lei (6.050 H1 / 6.325 H2 2026),
-/// deducerea = 0 (confirmat și de [`deducere_plafonata`], care e sursa unică a plafonului).
+/// ANCORARE PE SALARIUL MINIM (nu pe o sumă fixă): deducerea = procent × salariul minim brut al lunii
+/// (`min_wage_lei(year, month)` = 4.050 sem. I / 4.325 sem. II 2026). Procentul la nivelul salariului
+/// minim, pe număr de persoane în întreținere, este 20% / 25% / 30% / 35% / 45% (0/1/2/3/≥4).
 ///
-/// Limitarea de a nu depăși „venitul net disponibil" rămâne în `compute_payroll` (nu se aplică în tabel).
+/// PLAFON art. 77 alin. (2)-(3): deducerea de bază se acordă DOAR pentru brut ≤ salariul minim + 2.000
+/// lei (6.050 sem. I / 6.325 sem. II 2026); peste plafon = 0. Între salariul minim și plafon, componenta
+/// de bază (20 p.p.) scade LINIAR la 0, iar suplimentul pe persoană (5 p.p./persoană) rămâne constant —
+/// deci la plafon procentele reziduale sunt 0% / 5% / 10% / 15% / 25% (0/1/2/3/≥4). Pentru brut ≤
+/// salariul minim se acordă procentul integral.
 ///
-/// TABELUL 2026 (lei/lună, venitul brut în lei):
-/// ┌──────────────────────────────────────────────────────────────────────────┐
-/// │  Persoane în │    0 pers   │   1 pers   │   2 pers   │   3 pers   │ ≥4  │
-/// │  întreținere │             │            │            │            │     │
-/// ├──────────────┼─────────────┼────────────┼────────────┼────────────┼─────┤
-/// │  ≤ 2.000     │     807     │   1.000    │   1.300    │   1.700    │ 1.700+│
-/// │ 2.001–3.600  │ linear↓0 (1)│ linear↓0  │ linear↓0  │ linear↓0  │     │
-/// │ > 3.600      │      0      │     0      │     0      │     0      │  0  │
-/// └──────────────┴─────────────┴────────────┴────────────┴────────────┴─────┘
-/// (1) Formula liniară: Ded(brut) = max(0, D0 × (3.600 − brut) / 1.600)
-///     unde D0 = deducerea maximă (brut ≤ 2.000) — pentru 0 pers = 807, 1 pers = 1.000, etc.
-///     PLUS suplimentele pentru ≥1 persoană: (Dn − D0) × (3.600 − brut) / 1.600, totul egal la
-///     = Dn × (3.600 − brut) / 1.600 (formula unificată). Rotunjire la leu întreg (cf. normelor).
+/// (Nota istorică: până în 2023 deducerea se stingea la un brut FIX de 3.600 lei; forma actuală o
+/// ancorează pe salariul minim, deci se aplică până la ~6.050/6.325 lei în 2026.)
 ///
-/// Sursa: OMFP 4/2024 + Codul Fiscal 2026 art. 77.
-pub fn deducere_personala_tabel(gross: Decimal, dependents: u32) -> Decimal {
+/// Limitarea la „venitul net disponibil" rămâne în `compute_payroll` (nu se aplică aici). Plafonul
+/// e re-verificat de [`deducere_plafonata`] (aceeași ancorare salariul_minim + 2.000).
+///
+/// Sursa: Codul Fiscal art. 77 alin. (1)-(3), 2026.
+pub fn deducere_personala_tabel(gross: Decimal, dependents: u32, year: i32, month: u32) -> Decimal {
     let z = Decimal::ZERO;
     let gross = gross.max(z);
-    // Plafon art. 77 alin. (2): brut > 3.600 → deducere 0 (aplicat uniform indiferent de dependents).
-    if gross > Decimal::from(3600) {
+    let min_wage = min_wage_lei(year, month);
+    let ceiling = min_wage + Decimal::from(2000);
+    // Art. 77 alin. (2)-(3): brut > salariul minim + 2.000 → deducerea de bază = 0.
+    if gross > ceiling {
         return z;
     }
-    // Deducerea maximă (brut ≤ 2.000) per număr de persoane în întreținere (tabel ANAF 2026).
-    let max_ded = Decimal::from(match dependents {
-        0 => 807,
-        1 => 1000,
-        2 => 1300,
-        3 => 1700,
-        _ => 1700, // ≥ 4 persoane → aceeași coloană ca 3 (tabelul ANAF are max 4 coloane)
+    // Procentul de bază la nivelul salariului minim, pe număr de persoane în întreținere.
+    let base_pct = Decimal::from(match dependents {
+        0 => 20,
+        1 => 25,
+        2 => 30,
+        3 => 35,
+        _ => 45, // ≥ 4 persoane
     });
-    if gross <= Decimal::from(2000) {
-        return max_ded;
-    }
-    // Interval liniar 2.001–3.600: Ded = max(0, max_ded × (3.600 − brut) / 1.600)
-    let ded = max_ded * (Decimal::from(3600) - gross) / Decimal::from(1600);
+    // ≤ salariul minim: procent integral. Între salariul minim și plafon: componenta de bază (20 p.p.)
+    // scade liniar la 0; suplimentul pe persoană (base_pct − 20) rămâne constant până la plafon.
+    let pct = if gross <= min_wage {
+        base_pct
+    } else {
+        let decline = Decimal::from(20) * (gross - min_wage) / Decimal::from(2000);
+        (base_pct - decline).max(z)
+    };
+    let ded = pct / Decimal::from(100) * min_wage;
     ded.max(z)
         .round_dp_with_strategy(0, RoundingStrategy::MidpointAwayFromZero)
 }
@@ -509,6 +512,41 @@ mod tests {
             deducere_plafonata(d("-10"), d("3000"), 2026, 3),
             Decimal::ZERO
         );
+    }
+
+    #[test]
+    fn deducere_personala_tabel_min_wage_anchored_2026() {
+        // Ancorare pe salariul minim (art. 77, forma 2023) — NU plafonul fix de 3.600 lei de dinainte.
+        // H2 2026: salariul minim 4.325, plafon 6.325. 0 persoane în întreținere → 20% la nivelul minim.
+        // Brut ≤ salariul minim → procent integral 20% × 4.325 = 865.
+        assert_eq!(deducere_personala_tabel(d("4000"), 0, 2026, 9), d("865"));
+        assert_eq!(deducere_personala_tabel(d("4325"), 0, 2026, 9), d("865"));
+        // Interval de degresivitate: 4.400 → 19,25% × 4.325 = 832,56 → 833 (NU 0 ca în bug-ul vechi).
+        assert_eq!(deducere_personala_tabel(d("4400"), 0, 2026, 9), d("833"));
+        // 5.000 → 13,25% × 4.325 = 573,06 → 573.
+        assert_eq!(deducere_personala_tabel(d("5000"), 0, 2026, 9), d("573"));
+        // Exact pe plafon (6.325): 0% pentru 0 pers; peste plafon → 0.
+        assert_eq!(
+            deducere_personala_tabel(d("6325"), 0, 2026, 9),
+            Decimal::ZERO
+        );
+        assert_eq!(
+            deducere_personala_tabel(d("6326"), 0, 2026, 9),
+            Decimal::ZERO
+        );
+        // Rezidual pe plafon pentru persoane în întreținere: 1 pers → 5% × 4.325 = 216 la 6.325.
+        assert_eq!(deducere_personala_tabel(d("6325"), 1, 2026, 9), d("216"));
+        // Procente de bază la nivelul salariului minim, pe persoane în întreținere (H1: min 4.050).
+        assert_eq!(deducere_personala_tabel(d("3000"), 0, 2026, 3), d("810")); // 20% × 4050
+        assert_eq!(deducere_personala_tabel(d("3000"), 1, 2026, 3), d("1013")); // 25% × 4050 = 1012,5→1013
+        assert_eq!(deducere_personala_tabel(d("3000"), 2, 2026, 3), d("1215")); // 30% × 4050
+        assert_eq!(deducere_personala_tabel(d("3000"), 4, 2026, 3), d("1823")); // 45% × 4050 = 1822,5→1823
+                                                                                // H1 plafon 6.050: brut 6.100 → 0; brut 5.000 → 10,5% × 4.050 = 425.
+        assert_eq!(
+            deducere_personala_tabel(d("6100"), 0, 2026, 3),
+            Decimal::ZERO
+        );
+        assert_eq!(deducere_personala_tabel(d("5000"), 0, 2026, 3), d("425"));
     }
 
     #[test]

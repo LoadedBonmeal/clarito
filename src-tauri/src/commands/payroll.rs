@@ -1682,26 +1682,25 @@ mod tests {
 
     // ── Simulator salariu — unit tests ────────────────────────────────────────
 
-    /// GOLDEN-1: simulate_salary(5000, 0 dependents) matches compute_payroll byte-identically.
-    /// This is the single-source-of-truth guarantee: the simulator and a real payroll run (without
-    /// concedii / extra income / part-time top-up) must produce the same numbers for the same gross.
+    /// GOLDEN-1: simulate_salary(5000, 0 dependents) applies the correct art. 77 basic personal
+    /// deduction (min-wage-anchored, NOT the pre-2023 3.600-lei cliff) and reuses compute_payroll.
+    /// Default opts → H1 2026, min wage 4.050, ceiling 6.050; gross 5.000 is under the ceiling, so
+    /// deducere = 10,5% × 4.050 = 425 lei. CAS 1250, CASS 500, base 3250−425 = 2825, impozit 283,
+    /// net 2967, CAM 113. (Before the fix the table wrongly returned 0 → impozit 325 / net 2925.)
     #[tokio::test]
-    async fn simulator_matches_real_payroll_5000_no_deduction() {
-        // From the golden test in d112.rs (payroll_2026_rates_gross_to_net):
-        // gross 5000, 0 dependents → CAS 1250, CASS 500, impozit 325, net 2925, CAM 113.
-        // Deducere 0 (gross 5000 > plafon 6050 H1 NO — 5000 < 6050, dar tabelul dă 0 la gross>3600).
+    async fn simulator_gross_5000_h1_applies_deducere() {
         let r = simulate_salary("5000".into(), None).await.unwrap();
         assert_eq!(r.gross, "5000.00", "gross");
         assert_eq!(r.cas, "1250.00", "CAS 25%");
         assert_eq!(r.cass, "500.00", "CASS 10%");
-        assert_eq!(r.impozit, "325.00", "impozit 10%");
-        assert_eq!(r.net, "2925.00", "net");
+        assert_eq!(r.deducere_tabel, "425.00", "deducere art.77 = 10,5% × 4050");
+        assert_eq!(r.impozit, "283.00", "impozit 10% pe baza 2825");
+        assert_eq!(r.net, "2967.00", "net");
         assert_eq!(r.cam, "113.00", "CAM 2.25% — NOT phantom CCI");
         assert_eq!(
             r.total_employer_cost, "5113.00",
             "cost angajator = brut + CAM only"
         );
-        // No CCI: confirm total_employer_cost = gross + cam (byte-identical to PayrollResult).
         assert!(
             !r.carveout_applied,
             "no carveout for gross=5000 without beneficiar flag"
@@ -1711,10 +1710,10 @@ mod tests {
     /// GOLDEN-2: deducere personală cu dependenți modifică impozitul corect.
     #[tokio::test]
     async fn simulator_deduction_reduces_impozit() {
-        // Gross 2000 (≤ 2000): 0 dependents → deducere_tabel = 807; 2 dependents → 1300.
-        // CAS 25%*2000=500; CASS 10%*2000=200; after=1300.
-        // 0 dep: impozit_base = 1300 − 807 = 493; impozit = 49.
-        // 2 dep: impozit_base = 1300 − 1300 = 0; impozit = 0.
+        // Gross 2000 (≤ salariul minim H1 = 4.050 → procent integral): 0 dep → 20% × 4050 = 810;
+        // 2 dep → 30% × 4050 = 1215. CAS 25%*2000=500; CASS 10%*2000=200; after=1300.
+        // 0 dep: impozit_base = 1300 − 810 = 490; impozit = 49.
+        // 2 dep: impozit_base = 1300 − 1215 = 85; impozit = round(8,5) = 9.
         let r0 = simulate_salary(
             "2000".into(),
             Some(SalarySimOpts {
@@ -1726,8 +1725,8 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(r0.deducere_tabel, "807.00");
-        assert_eq!(r0.impozit_base, "493.00");
+        assert_eq!(r0.deducere_tabel, "810.00");
+        assert_eq!(r0.impozit_base, "490.00");
         assert_eq!(r0.impozit, "49.00");
 
         let r2 = simulate_salary(
@@ -1741,9 +1740,9 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(r2.deducere_tabel, "1300.00");
-        assert_eq!(r2.impozit_base, "0.00");
-        assert_eq!(r2.impozit, "0.00");
+        assert_eq!(r2.deducere_tabel, "1215.00");
+        assert_eq!(r2.impozit_base, "85.00");
+        assert_eq!(r2.impozit, "9.00");
     }
 
     /// GOLDEN-3: net→gross round-trip — simulate_net_to_gross(simulate_gross_to_net(G).net) ≈ G.
@@ -1773,8 +1772,11 @@ mod tests {
             .await
             .unwrap();
             let inv_gross: u32 = inv.gross.trim_end_matches(".00").parse().unwrap_or(0);
-            assert_eq!(
-                inv_gross, gross_lei,
+            // Net is rounded to whole leu and the art. 77 deduction now varies with gross, so a few
+            // adjacent gross values can map to the SAME net (flat spots). simulate_salary_from_net
+            // returns the smallest gross achieving the target net — accept a ±1 leu collision.
+            assert!(
+                inv_gross.abs_diff(gross_lei) <= 1,
                 "round-trip failed for gross={gross_lei}: got {inv_gross}"
             );
         }
@@ -1910,8 +1912,8 @@ pub async fn simulate_salary(
     }
 
     let non_taxable = suma_netaxabila(opts.beneficiar_suma_netaxabila, "N", gross, year, month);
-    // Deducerea din tabel (pe brut complet, înainte de CAS/CASS — tabel ANAF art. 77).
-    let deducere_tabel = deducere_personala_tabel(gross, opts.dependents);
+    // Deducerea de bază din tabel (art. 77, ancorată pe salariul minim al lunii).
+    let deducere_tabel = deducere_personala_tabel(gross, opts.dependents, year, month);
     // Plafonarea art. 77 alin. (2): dacă brut > salariul_minim + 2.000, deducere = 0.
     let deducere_platita = deducere_plafonata(deducere_tabel, gross, year, month);
 
@@ -1990,7 +1992,7 @@ pub async fn simulate_salary_from_net(
     let net_for = |g: i64| -> Decimal {
         let gross = Decimal::from(g);
         let non_taxable = suma_netaxabila(opts.beneficiar_suma_netaxabila, "N", gross, year, month);
-        let deducere_tabel = deducere_personala_tabel(gross, opts.dependents);
+        let deducere_tabel = deducere_personala_tabel(gross, opts.dependents, year, month);
         let deducere_platita = deducere_plafonata(deducere_tabel, gross, year, month);
         let r = compute_payroll(&PayrollInput {
             gross,
