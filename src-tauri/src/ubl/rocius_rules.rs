@@ -88,6 +88,7 @@ pub fn run_all(ctx: &RuleContext<'_>) -> (Vec<String>, Vec<String>) {
     // ── EN16931 category "O" / Bucharest sector (BR-O-xx / BR-RO-100..101) ──
     check!(rule_o_category_not_mixed_with_others);
     check!(rule_o_category_seller_not_vat_payer);
+    check!(rule_k_category_requires_vat_payer);
     check!(rule_bucharest_sector_required);
 
     // ── Warnings (non-blocking) ────────────────────────────────────────────
@@ -739,6 +740,26 @@ fn rule_o_category_seller_not_vat_payer(ctx: &RuleContext<'_>) -> Option<String>
             "[BR-O-02] Furnizorul este plătitor de TVA dar factura conține o linie cu \
              categoria TVA 'O' (în afara sferei TVA). Un plătitor de TVA nu poate emite linii \
              'O' — verificați categoria TVA a liniilor sau statutul de plătitor al furnizorului."
+                .into(),
+        )
+    } else {
+        None
+    }
+}
+
+/// EN16931 BR-IC-02: an invoice with an intra-community-exempt ("K") VAT breakdown must
+/// carry the Seller VAT identifier (BT-31). A non-VAT-payer seller has no VAT id (the
+/// generator correctly omits the VAT PartyTaxScheme for neplătitori), and legally a
+/// neplătitor cannot perform scutit intra-community supplies — block at preflight instead
+/// of letting ANAF reject with BR-IC-02.
+fn rule_k_category_requires_vat_payer(ctx: &RuleContext<'_>) -> Option<String> {
+    let has_k = ctx.lines.iter().any(|l| l.vat_category == "K");
+    if has_k && !ctx.supplier.vat_payer {
+        Some(
+            "[BR-IC-02] Factura conține linii cu categoria TVA 'K' (livrare intracomunitară \
+             scutită), dar furnizorul nu este plătitor de TVA. Numai un furnizor înregistrat \
+             în scopuri de TVA poate emite livrări intracomunitare scutite — verificați \
+             categoria TVA a liniilor."
                 .into(),
         )
     } else {
@@ -1850,6 +1871,59 @@ mod tests {
         assert!(
             !has_sector_err,
             "non-Bucharest addresses must never trigger the sector rule, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn k_line_from_non_vat_payer_fails_br_ic_02() {
+        // A neplătitor cannot issue intra-community-exempt (K) supplies — the generator
+        // omits their VAT PartyTaxScheme, so ANAF would reject with BR-IC-02.
+        let invoice = sample_invoice();
+        let mut k_line = sample_line();
+        k_line.vat_category = "K".into();
+        k_line.vat_rate = "0.00".into();
+        k_line.vat_amount = "0.00".into();
+        let lines = vec![k_line];
+        let mut supplier = sample_supplier();
+        supplier.vat_payer = false;
+        let buyer = sample_buyer();
+        let ctx = RuleContext {
+            invoice: &invoice,
+            lines: &lines,
+            supplier: &supplier,
+            buyer: &buyer,
+            storno_ref: None,
+        };
+        let (errors, _) = run_all(&ctx);
+        assert!(
+            errors.iter().any(|e| e.contains("[BR-IC-02]")),
+            "Expected BR-IC-02 error for a K line from a non-VAT-payer seller, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn k_line_from_vat_payer_passes_br_ic_02() {
+        let invoice = sample_invoice();
+        let mut k_line = sample_line();
+        k_line.vat_category = "K".into();
+        k_line.vat_rate = "0.00".into();
+        k_line.vat_amount = "0.00".into();
+        let lines = vec![k_line];
+        let supplier = sample_supplier(); // vat_payer = true in the fixture
+        let buyer = sample_buyer();
+        let ctx = RuleContext {
+            invoice: &invoice,
+            lines: &lines,
+            supplier: &supplier,
+            buyer: &buyer,
+            storno_ref: None,
+        };
+        let (errors, _) = run_all(&ctx);
+        assert!(
+            !errors.iter().any(|e| e.contains("[BR-IC-02]")),
+            "BR-IC-02 must not fire for a VAT-payer seller, got: {:?}",
             errors
         );
     }
