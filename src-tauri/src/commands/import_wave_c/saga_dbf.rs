@@ -31,11 +31,14 @@
 //!
 //! SAGA DBF files are commonly CP852 (MS-DOS East-European) or CP1250
 //! (Windows Central-European). The adapter opens the file under three candidate
-//! encodings in order — CP852 → CP1250 → strict UTF-8 (`dbase`'s `yore`-backed
-//! `Reader::new_with_encoding`, one full re-parse per candidate) — and picks the
-//! first whose first-record sample contains valid Romanian diacritics (ă â î ș ț —
-//! both comma-below and cedilla variants) and no Unicode replacement character
-//! (U+FFFD). If none satisfies the heuristic, it falls through to the crate default
+//! encodings — CP852, CP1250, strict UTF-8 (`dbase`'s `yore`-backed
+//! `Reader::new_with_encoding`, one full re-parse per candidate) — samples up to the
+//! first 16 records under each, and scores every candidate by the TOTAL number of
+//! valid Romanian diacritics (ă â î ș ț — both comma-below and cedilla variants)
+//! across the sample, disqualifying any record containing U+FFFD. The highest score
+//! wins; a tie keeps the earlier candidate (CP852, the SAGA MS-DOS default — see
+//! `pick_dbf_encoding` for the 0xEE 'ţ'↔'î' ambiguity rationale). If no candidate
+//! scores at all (e.g. an ASCII-only file), it falls through to the crate default
 //! (`UnicodeLossy`, i.e. UTF-8 with lossy replacement — the pre-fix behavior).
 //!
 //! This heuristic is documented here rather than trusted blindly — a real export

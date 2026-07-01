@@ -154,6 +154,9 @@ pub async fn suggest_matches(
                     let r_up = r.to_uppercase();
                     full_number
                         .as_ref()
+                        // Guard an empty number: contains("") is always true and would
+                        // fabricate HIGH confidence.
+                        .filter(|n| !n.trim().is_empty())
                         .map(|n| r_up.contains(&n.to_uppercase()))
                         .unwrap_or(false)
                 })
@@ -186,8 +189,15 @@ pub async fn suggest_matches(
         }
     } else {
         // ── Outgoing: match against OPEN received invoices (401) ─────────────
+        // NOTE: received_invoices has SERIES + NUMBER columns (no `invoice_number`) — the old
+        // `ri.invoice_number` select failed at runtime ("no such column") and the caller's
+        // unwrap_or_default() swallowed it, so OUTGOING suggestions never worked at all
+        // (found via the Wave-4 QA follow-up). Compose the display number like gl.rs does.
         let inv_rows = sqlx::query(
-            "SELECT ri.id, ri.invoice_number AS full_number, ri.total_amount, \
+            "SELECT ri.id, \
+                    TRIM(COALESCE(ri.series,'') || ' ' || COALESCE(ri.number,'')) AS full_number, \
+                    ri.total_amount, \
+                    COALESCE(NULLIF(TRIM(ri.currency),''),'RON') AS currency, \
                     COALESCE(ri.issuer_name,'') AS partner_name, \
                     COALESCE(ri.issuer_cui,'')  AS partner_cui \
              FROM received_invoices ri \
@@ -228,6 +238,16 @@ pub async fn suggest_matches(
             let partner_name: String = row.try_get("partner_name").unwrap_or_default();
             let partner_cui: String = row.try_get("partner_cui").unwrap_or_default();
 
+            // Wave 4 audit (QA follow-up): the currency filter must cover the OUTGOING
+            // direction too — an EUR −500 bank line must not suggest a RON 500 supplier
+            // invoice just because the amounts collide.
+            let inv_cur: String = row
+                .try_get("currency")
+                .unwrap_or_else(|_| "RON".to_string());
+            if inv_cur.trim().to_uppercase() != txn_cur {
+                continue;
+            }
+
             let total = dec(&total_str);
             let paid = paid_map.get(&inv_id).copied().unwrap_or(Decimal::ZERO);
             let outstanding = total - paid;
@@ -244,6 +264,9 @@ pub async fn suggest_matches(
                     let r_up = r.to_uppercase();
                     full_number
                         .as_ref()
+                        // Guard an empty number: contains("") is always true and would
+                        // fabricate HIGH confidence.
+                        .filter(|n| !n.trim().is_empty())
                         .map(|n| r_up.contains(&n.to_uppercase()))
                         .unwrap_or(false)
                 })
@@ -326,6 +349,67 @@ mod tests {
         .execute(pool)
         .await
         .unwrap();
+    }
+
+    async fn seed_received(pool: &SqlitePool, id: &str, total: &str, currency: &str) {
+        sqlx::query(
+            "INSERT INTO received_invoices \
+             (id, company_id, anaf_download_id, anaf_index, issuer_cui, issuer_name, \
+              series, number, total_amount, net_amount, vat_amount, currency, exchange_rate, \
+              issue_date, xml_path, pdf_path, status, is_advance, downloaded_at, created_at) \
+             VALUES (?1,'co','DL-1',NULL,'RO11223342','FURNIZOR SRL', \
+                     'FF','77',?2,?2,'0',?3,NULL,'2026-01-05','','','APPROVED',0,0,0)",
+        )
+        .bind(id)
+        .bind(total)
+        .bind(currency)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    /// The outgoing (supplier) direction must actually WORK — the old SQL selected a
+    /// non-existent `ri.invoice_number` column, so every outgoing suggestion silently
+    /// failed at runtime (unwrap_or_default at the caller). Regression guard.
+    #[tokio::test]
+    async fn suggest_outgoing_matches_received_invoice() {
+        let pool = pool().await;
+        seed_received(&pool, "ri1", "800.00", "RON").await;
+
+        let amount = Decimal::from_str("-800.00").unwrap();
+        let sugg = suggest_matches(&pool, "co", &amount, "RON", Some("Plata FF 77"), None)
+            .await
+            .unwrap();
+        assert!(
+            sugg.iter().any(|s| s.invoice_id == "ri1"),
+            "outgoing txn must suggest the open received invoice, got: {:?}",
+            sugg
+        );
+        let hit = sugg.iter().find(|s| s.invoice_id == "ri1").unwrap();
+        assert_eq!(hit.direction, "received");
+        assert_eq!(
+            hit.confidence,
+            MatchConfidence::High,
+            "series+number in the reference must give HIGH confidence"
+        );
+    }
+
+    /// Wave 4 QA follow-up: the currency filter must cover the OUTGOING direction too —
+    /// a EUR −800 bank line must not suggest a RON 800 supplier invoice.
+    #[tokio::test]
+    async fn suggest_outgoing_no_cross_currency_amount_match() {
+        let pool = pool().await;
+        seed_received(&pool, "ri2", "800.00", "RON").await;
+
+        let amount = Decimal::from_str("-800.00").unwrap();
+        let sugg = suggest_matches(&pool, "co", &amount, "EUR", None, None)
+            .await
+            .unwrap();
+        assert!(
+            sugg.iter().all(|s| s.invoice_id != "ri2"),
+            "a EUR outgoing txn must not match a RON received invoice on amount alone, got: {:?}",
+            sugg
+        );
     }
 
     #[tokio::test]
