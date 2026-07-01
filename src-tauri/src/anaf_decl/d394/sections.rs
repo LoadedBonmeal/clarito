@@ -521,6 +521,13 @@ fn map_sales_partner(partner: &D394Partner, period: NaiveDate) -> (&'static str,
             ("V", 0, false)
         }
         // Scutite / zero-rate / intra-EU delivery / outside-scope
+        //
+        // KNOWN LIMITATION (final v0.7.3 audit; deferred, verify-first): routing K (intra-EU,
+        // D390 territory) and Z/G (exports) into D394 as "LS" may DOUBLE-DECLARE operations that
+        // the ANAF instructions scope to D390/vamă, not D394 (D394 covers operațiuni pe teritoriul
+        // național). The safe fix — EXCLUDING K (and possibly Z/G with non-RO partners) from the
+        // D394 partner rollup — must be validated against the official D394 instructions + a DUK
+        // run on a mixed fixture before changing declared totals; do not blind-edit.
         "E" | "Z" | "K" | "O" | "G" => ("LS", 0, false),
         _ => ("LS", 0, false),
     }

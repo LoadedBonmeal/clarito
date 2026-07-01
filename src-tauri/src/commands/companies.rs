@@ -19,6 +19,14 @@ pub async fn get_company(state: State<'_, AppState>, id: String) -> AppResult<Co
 /// Micro-ceiling status for a company: its year-to-date sales turnover (RON) vs the 100.000 EUR
 /// micro ceiling (`eur_ron` = the EUR→RON rate the FE supplies, e.g. the year-end BNR rate), with
 /// an advisory when approaching/exceeding it. Turnover proxy = validated, non-storno sales net.
+///
+/// KNOWN LIMITATION (final v0.7.3 audit; ADVISORY-ONLY impact): the art. 53 Cod fiscal micro
+/// base is "veniturile din orice sursă" minus the lit. a)-… exclusions (711/712 stock-variation,
+/// 721/722 own-work capitalised, 741x subsidies, 781x provisions reversals, etc.), not just the
+/// invoice subtotal sum used here — so this HINT can understate the true base for companies with
+/// other class-7 revenue. The D100 filing itself is entered from the accountant's own base and is
+/// unaffected. Correct fix: derive the base from the class-7 trial balance minus the excluded
+/// accounts; needs the exclusion list encoded + tests.
 #[tauri::command]
 pub async fn tax_regime_status(
     state: State<'_, AppState>,

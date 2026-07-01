@@ -924,6 +924,16 @@ pub async fn compute_payroll_run(
                 sal_net: lr.net,
                 sal_cam: lr.cam,
                 sal_taxable_base: lr.taxable_base,
+                // KNOWN LIMITATION (final v0.7.3 audit; deferred, B-path/medical-leave):
+                // (a) `sal_personal_deduction: ZERO` — the leave path embeds the deduction in
+                //     `taxable_base` but D112's E1_4/E1_41/E3_12/E3_121 then declare deducere=0
+                //     even when one was applied; the XML should carry the actual deduction used
+                //     (needs a leave+deduction golden fixture through the DUK).
+                // (b) `part_time_min: None` — a PART-TIME below-minimum employee in a leave
+                //     month skips the art. 146 (5^6) prorated min-base lift entirely (the lift
+                //     applies to the worked fraction; skipping under-declares CAS/CASS). Fix:
+                //     prorate the min base over the worked days (A_13P formula) like the A-path,
+                //     with a mixed leave+part-time fixture; delicate — do not blind-edit.
                 sal_personal_deduction: Decimal::ZERO,
                 combined_cas: gl_cas,
                 combined_cass: gl_cass,

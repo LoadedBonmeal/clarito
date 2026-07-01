@@ -292,6 +292,18 @@ async fn get_prior_rate(
 /// 5. Upsert rânduri în `fx_revaluation`.
 ///
 /// Idempotentă: re-rularea înlocuiește nota + rândurile existente.
+///
+/// KNOWN LIMITATION (final v0.7.3 audit; deferred — needs a reval-design decision + golden
+/// fixtures, not a hasty edit): the revaluation is CHAINED (each month books the diff vs the
+/// PRIOR month-end rate, adjusting the 4111/401 carrying value; prior notes are never
+/// reversed), but `post_payment` relieves the receivable at the INVOICE rate — so settling a
+/// previously-revalued FX invoice strands the accumulated reval residual on 4111/401 and
+/// double-counts FX P&L (665/765 booked both by the reval chain and by the settlement diff).
+/// Related: a storno'd FX invoice pair (net outstanding 0) still books phantom monthly diffs
+/// because the CN's negative outstanding is revalued independently. Correct fix: either
+/// reversal-based revaluation (reverse the prior note each month) or settle-at-carrying-rate
+/// (relieve at booking_rate + accumulated reval, not the invoice rate), plus skip fully
+/// storno'd pairs; both change GL history shape → dedicated fixtures + accountant review.
 pub async fn compute_fx_revaluation(
     pool: &SqlitePool,
     company_id: &str,

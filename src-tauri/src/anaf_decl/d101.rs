@@ -37,6 +37,13 @@ pub struct D101Input {
     #[serde(default)]
     pub sponsorship: Decimal,
     /// Cifra de afaceri (pentru plafonul de 0,75% al sponsorizării). Default: venituri din exploatare.
+    ///
+    /// KNOWN LIMITATION (final v0.7.3 audit; deferred): art. 25 alin. (4) lit. i) Cod fiscal caps
+    /// the sponsorship credit at 0,75% × CIFRA DE AFACERI (70x−709, the OMFP 1802 definition) —
+    /// NARROWER than "venituri din exploatare" (which also includes 711/712/721/722/741x/758x),
+    /// so the default can OVERSTATE the cap and thus the credit. Fix: derive cifra de afaceri
+    /// from the 70x trial-balance accounts and feed that here; prove with a fixture carrying
+    /// 711/741 revenue.
     #[serde(default)]
     pub turnover: Decimal,
     /// Plăți anticipate / impozit declarat prin D100 în cursul anului.

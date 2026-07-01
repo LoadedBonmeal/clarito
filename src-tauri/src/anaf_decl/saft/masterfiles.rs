@@ -980,6 +980,14 @@ pub async fn write_assets(
         return Ok(());
     }
 
+    // KNOWN LIMITATION (final v0.7.3 audit; deferred): `active = 1` EXCLUDES assets disposed
+    // DURING the declared year — but the D406A roll-forward should report them with their
+    // AssetDisposal movement; and the movement columns below (Additions/Transfers/Disposal/
+    // Appreciation) are emitted as fixed values instead of being derived from the year's
+    // asset_transactions. Fix: include in-year-disposed assets (dispose date within the
+    // period) and aggregate asset_transactions per asset into the movement columns, then
+    // re-validate an annual fixture against the official XSD + DUK. Annual-only impact
+    // (periodic L emits an empty Assets section, unaffected).
     let asset_rows = sqlx::query(
         "SELECT id, asset_code, account_id, description, valuation_class, \
                 supplier_id, supplier_name, date_of_acquisition, start_up_date, \

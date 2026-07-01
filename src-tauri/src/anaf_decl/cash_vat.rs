@@ -12,6 +12,15 @@
 //! rules. We key on the CIUS VAT category (S/AE/E/Z/K/O/G), which captures the
 //! category-driven exclusions; affiliation and margin schemes are not modelled (the app
 //! does not track them) and would need extra metadata.
+//!
+//! KNOWN LIMITATION (final v0.7.3 audit; deferred, verify-first): when a cash-VAT original
+//! is STORNO'd and a PRIOR period's D300 is later recomputed, the storno'd original can
+//! revert to issue-date exigibility in that recompute, inflating the collected VAT of the
+//! earlier period (the settlement-event ledger records the storno at its own date; the
+//! recompute must keep honouring the deferral history, not the current invoice status).
+//! Fix requires replaying the settlement ledger as-of the recomputed period + a golden
+//! fixture (storno in month N of a month N-1 cash-VAT invoice, recompute N-1) — a delicate
+//! change to declared history; do not blind-edit.
 
 /// Cash-VAT status of a single operation (invoice line / per-rate VAT group).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

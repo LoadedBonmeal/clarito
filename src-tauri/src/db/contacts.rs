@@ -283,6 +283,14 @@ pub async fn create(pool: &SqlitePool, input: CreateContactInput) -> AppResult<C
 /// ownership and return `NotFound` for any mismatch. The UPDATE SQL is also
 /// scoped with `AND company_id = ?` as a defence-in-depth layer.
 /// S1: `get` is now company-scoped so the ownership check is implicit.
+///
+/// KNOWN LIMITATION (final v0.7.3 audit; deferred): re-typing a contact that already has
+/// INVOICED history (e.g. CUSTOMER → SUPPLIER) makes the SAF-T D406 MasterFiles loop skip
+/// it on the old side, leaving the historical gl_entry customer_id/supplier_id references
+/// dangling (Customers/Suppliers sections are built from the CURRENT contact_type). Fix:
+/// either block a type change once documents exist (suggest "AMBELE"/both instead) or make
+/// the D406 master-files loops derive partner roles from the DOCUMENT history rather than
+/// the current type; needs a re-typed-contact fixture through the XSD+DUK gate.
 pub async fn update(
     pool: &SqlitePool,
     id: &str,
