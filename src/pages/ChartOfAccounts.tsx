@@ -314,9 +314,17 @@ export function ChartOfAccountsPage() {
                             className={`tog${a.active ? " on" : ""}`}
                             role="switch"
                             aria-checked={a.active}
+                            aria-label={a.active ? t("accounts.row.deactivate") : t("accounts.row.activate")}
                             title={a.active ? t("accounts.row.deactivate") : t("accounts.row.activate")}
+                            tabIndex={0}
                             style={{ cursor: "pointer", opacity: toggleMutation.isPending ? 0.6 : 1 }}
                             onClick={() => { if (!toggleMutation.isPending) toggleMutation.mutate(a); }}
+                            onKeyDown={(e) => {
+                              if ((e.key === "Enter" || e.key === " ") && !toggleMutation.isPending) {
+                                e.preventDefault();
+                                toggleMutation.mutate(a);
+                              }
+                            }}
                           />
                         </td>
                         <td>

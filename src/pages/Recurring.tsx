@@ -454,8 +454,15 @@ export function RecurringPage() {
                       role="switch"
                       aria-checked={r.autoSubmitAnaf}
                       aria-label={t("recurring.row.autoAnafAria")}
+                      tabIndex={0}
                       style={toggleAutoAnaf.isPending ? { opacity: 0.5, pointerEvents: "none" } : undefined}
                       onClick={() => toggleAutoAnaf.mutate(r)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          toggleAutoAnaf.mutate(r);
+                        }
+                      }}
                     />
                   </td>
                   <td style={{ textAlign: "center" }}>
@@ -464,8 +471,15 @@ export function RecurringPage() {
                       role="switch"
                       aria-checked={r.active}
                       aria-label={r.active ? t("recurring.row.deactivate") : t("recurring.row.activate")}
+                      tabIndex={0}
                       style={toggleActive.isPending ? { opacity: 0.5, pointerEvents: "none" } : undefined}
                       onClick={() => toggleActive.mutate({ id: r.id, active: !r.active })}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          toggleActive.mutate({ id: r.id, active: !r.active });
+                        }
+                      }}
                     />
                   </td>
                   <td>
@@ -641,7 +655,15 @@ export function RecurringPage() {
                     className={`tog${form.autoSubmitAnaf ? " on" : ""}`}
                     role="switch"
                     aria-checked={form.autoSubmitAnaf}
+                    aria-label={t("recurring.modal.autoSubmit")}
+                    tabIndex={0}
                     onClick={() => setForm((f) => ({ ...f, autoSubmitAnaf: !f.autoSubmitAnaf }))}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        setForm((f) => ({ ...f, autoSubmitAnaf: !f.autoSubmitAnaf }));
+                      }
+                    }}
                   />
                   <span>{t("recurring.modal.autoSubmit")}</span>
                 </label>

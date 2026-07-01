@@ -425,7 +425,7 @@ th .cbx,td .cbx{vertical-align:middle}
 /* modal */
 .modal-back{position:absolute;inset:0;background:rgba(29,29,31,.34);display:none;align-items:center;justify-content:center;z-index:60}
 .modal-back.show{display:flex}
-.modal{width:540px;max-width:calc(100% - 80px);max-height:700px;background:var(--bg-content);border-radius:16px;box-shadow:0 30px 70px -20px rgba(0,0,0,.4);display:flex;flex-direction:column;overflow:hidden;isolation:isolate}
+.modal{width:540px;max-width:calc(100% - 80px);max-height:min(700px,calc(100vh - 48px));background:var(--bg-content);border-radius:16px;box-shadow:0 30px 70px -20px rgba(0,0,0,.4);display:flex;flex-direction:column;overflow:hidden;isolation:isolate}
 .modal.lg{width:680px}
 .modal-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:16px 18px 14px;border-bottom:1px solid var(--line)}
 .modal-head .mt{font-size:15px;font-weight:600}

@@ -813,9 +813,23 @@ export function DashboardPage() {
             {colPopOpen && (
               <div className="pop show" style={{ right: 0, top: 40, width: 230 }} onMouseDown={(e) => e.stopPropagation()}>
                 <div className="col-title">{t("dashboard.table.manageColumns")}</div>
-                <div className="col-row locked"><Ic name="users" /><span className="cl">{t("dashboard.table.client")}</span><span className="tog on" /></div>
+                <div className="col-row locked"><Ic name="users" /><span className="cl">{t("dashboard.table.client")}</span><span className="tog on" role="switch" aria-checked aria-disabled aria-label={t("dashboard.table.client")} /></div>
                 {([["doc", t("dashboard.table.document"), "docText"], ["data", t("dashboard.table.date"), "calendar"], ["scad", t("dashboard.table.due"), "clock"], ["val", t("dashboard.table.amount"), "calc"]] as const).map(([key, label, icon]) => (
-                  <div key={key} className="col-row" onClick={() => setHiddenCols((s) => ({ ...s, [key]: !s[key] }))}>
+                  <div
+                    key={key}
+                    className="col-row"
+                    role="switch"
+                    aria-checked={!hiddenCols[key]}
+                    aria-label={label}
+                    tabIndex={0}
+                    onClick={() => setHiddenCols((s) => ({ ...s, [key]: !s[key] }))}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        setHiddenCols((s) => ({ ...s, [key]: !s[key] }));
+                      }
+                    }}
+                  >
                     <Ic name={icon} /><span className="cl">{label}</span><span className={`tog${hiddenCols[key] ? "" : " on"}`} />
                   </div>
                 ))}

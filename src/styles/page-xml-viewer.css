@@ -27,6 +27,12 @@
   min-height: 0;
   overflow: hidden;
   background: #fff;
+  /* Pinned-white code surface (CodeMirror theme is light-only) — fix dark ink locally so
+     descendants using var(--text)/var(--text-2)/var(--text-3) stay readable in dark mode. */
+  --text: #1a1a1a;
+  --text-2: #4a4a50;
+  --text-3: #6e6e74;
+  --line: #d9d9de;
 }
 .xmlv-editor .cm-editor {
   height: 100%;
@@ -110,6 +116,14 @@
   overflow: auto;
   background: #fff;
   padding: 14px 16px;
+  /* Paper surface stays white in both themes — fix dark ink locally (P1: unreadable in
+     dark theme, since descendants inherit var(--text)/var(--text-2)/var(--text-3), which
+     are near-white in dark mode). */
+  --text: #1a1a1a;
+  --text-2: #4a4a50;
+  --text-3: #6e6e74;
+  --line: #d9d9de;
+  --fill: #f2f2f4;
 }
 .xmlv-table-msg {
   flex: 1;
@@ -221,6 +235,16 @@
   border-radius: 10px;
   padding: 28px 32px;
   color: var(--text);
+  /* This is a printable-document "paper" surface — it stays white in BOTH themes, so its
+     ink must be fixed locally too (P1 fix): descendants (.docv-kv-v/.docv-party-name/etc.)
+     read var(--text)/var(--text-2)/var(--text-3), which resolve near-white in dark mode
+     and make the document unreadable. Scoping the override here means every descendant
+     inherits it automatically. */
+  --text: #1a1a1a;
+  --text-2: #4a4a50;
+  --text-3: #6e6e74;
+  --line: #d9d9de;
+  --fill: #f2f2f4;
 }
 .docv-title {
   font-size: 18px;

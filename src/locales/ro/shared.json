@@ -393,7 +393,8 @@
         "draftNote": "Facturile emise importate sunt create ca DRAFT și nu postează înregistrări în jurnal. Contabilul trebuie să le revizuiască și să le valideze manual.",
         "errorList": "Erori detaliate:",
         "moreErrors_one": "…și încă {{count}} eroare.",
-        "moreErrors_other": "…și încă {{count}} erori."
+        "moreErrors_few": "…și încă {{count}} erori.",
+        "moreErrors_other": "…și încă {{count}} de erori."
       },
       "errors": {
         "filePicker": "Nu s-a putut deschide dialogul de selectare fișiere.",

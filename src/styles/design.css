@@ -34,7 +34,7 @@
   /* text */
   --text: #1D1D1F;
   --text-muted: #6E6E73;
-  --text-dim: #9A9AA0;
+  --text-dim: #6E6E74;
   --text-link: var(--accent);
 
   /* borders */

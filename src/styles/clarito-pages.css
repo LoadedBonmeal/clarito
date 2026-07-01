@@ -64,7 +64,7 @@ button.cbx { width: 16px; }
 .bar-tip i.l{background:#A1A1AA}
 .bar-tip em{margin-left:auto;padding-left:14px;font-style:normal;font-weight:600}
 .bar-col:hover .bar-tip{opacity:1;transform:translateX(-50%)}
-.bar-col:hover .bar.b-emise{background:#000}
+.bar-col:hover .bar.b-emise{background:var(--text)}
 .bar-col:hover .bar.b-primite{background:#BFBFC6}
 .bar{width:13px;border-radius:4px 4px 0 0;background:#E4E4E7}
 .bar.b-emise{background:var(--black)}

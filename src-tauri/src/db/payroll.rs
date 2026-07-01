@@ -1077,16 +1077,15 @@ pub async fn compute_payroll_run(
                     year,
                     month,
                 );
-                // KNOWN LIMITATION (found by the pre-publication audit; deferred): for a PART-TIME
-                // employee whose realized gross is below the minimum wage, art. 146 alin. (5^6) lifts the
-                // CAS/CASS base to `baza_cas`/`baza_cass` (the employer covering the difference). When such
-                // an employee ALSO has a diurnă excess, the D112-declared CAS/CASS should be computed on
-                // `baza_cas + excess`, but the combined base below uses `sal_gross + excess` (the realized
-                // gross), so build_d112_xml's Wave E overwrite under-declares CAS/CASS for that narrow
-                // combo. A correct fix must keep TWO CAS values — the D112 total on the lifted base vs. the
-                // employee's CAS on realized income that feeds `comb_impozit_base` (the tax base must NOT
-                // absorb the employer-borne lift) — so it needs dedicated golden fixtures + fiscal review
-                // rather than a hasty change to the payroll core here.
+                // NOTE (part-time + diurnă excess, art. 146 alin. (5^6)) — FIXED in 04b3227:
+                // `combined_cas/cass` here are INTENTIONALLY the employee's portion on the
+                // REALIZED income (`sal_gross + excess`), because they feed `comb_impozit_base`
+                // — the income-tax base deducts only the insured-borne contributions, never the
+                // employer-covered lift difference (art. 78). The D112-DECLARED CAS/CASS for a
+                // part-time-below-minimum employee is corrected downstream in build_d112_xml's
+                // Wave E (commands/payroll.rs), which recomputes them on the LIFTED base +
+                // excess so `B4_8 = ROUND(B4_7 × 25%)` and GL 4315/4316 ≡ D112 412/432 hold
+                // (golden test: gl_d112_golden_part_time_below_min_with_diurna_excess).
                 let combined_base = sal_gross + emp_excess;
                 let comb_cas = pct(combined_base, (25, 2));
                 let comb_cass = pct(combined_base, (10, 2));

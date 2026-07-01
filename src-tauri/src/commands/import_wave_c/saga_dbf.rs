@@ -199,13 +199,32 @@ fn require_bytes<'a>(input: &'a ImportInput, caller: &str) -> AppResult<&'a [u8]
 // because it is often 0x00 ("Undefined") in SAGA exports — and even when the `yore`
 // feature lets dbase resolve an "Undefined" ldid, it falls back to a LOSSY CP1252
 // decode (never errors, but silently mis-decodes CP852/CP1250 bytes as if they were
-// CP1252). So this picker re-opens the file under each candidate encoding in turn,
-// decodes the first record's Character fields, and scores each candidate the same
-// way `decode_ro_string` used to score raw bytes: prefer the first candidate whose
-// decoded sample contains at least one valid Romanian diacritic (ă â î ș ț, both
-// comma-below and cedilla variants) and no U+FFFD replacement character. Falls back
-// to UTF-8 lossy (today's pre-fix behavior) when no candidate scores — e.g. an
-// ASCII-only file, or one that genuinely has no diacritics in its very first record.
+// CP1252). So this picker re-opens the file under each candidate encoding in turn and
+// scores it across a MULTI-RECORD sample (up to `SAMPLE_SIZE` records, or all of them
+// if the file is smaller) — NOT just the first record.
+//
+// Sampling only the first record (the pre-fix heuristic) could misdetect: CP852 and
+// CP1250 share byte 0xEE, which decodes as 'î' (U+00EE) under CP1250 but as 'ţ'
+// (U+0163, cedilla-legacy) under CP852 — both are valid `RO_DIACRITICS`, so whichever
+// candidate is TRIED FIRST (CP852) wins on a single ambiguous record even when the file
+// is genuinely CP1250. Scoring across many records fixes this: a genuinely-CP1250 file
+// will have far more CP1250-valid (diacritic, no U+FFFD) records than CP852-valid ones,
+// because most bytes are NOT 0xEE and decode incompatibly under the wrong codepage,
+// producing U+FFFD (which disqualifies that record for that candidate) or simply no
+// diacritic hit.
+//
+// Each candidate's score = the TOTAL number of Romanian-diacritic occurrences
+// (ă â î ș ț, both comma-below and cedilla variants) across the sampled records; a
+// record containing any U+FFFD contributes nothing for that candidate (mirroring the
+// original heuristic's U+FFFD veto, applied per-record). The highest-scoring candidate
+// wins; a tie keeps the earlier candidate in the list — CP852 first, the historical
+// SAGA MS-DOS default. A CP852↔CP1250 tie can only happen when the text's ONLY
+// diacritics sit on the ambiguous 0xEE byte (CP852 'ţ' ↔ CP1250 'î'), which is
+// undecidable without a dictionary; real CP1250 ş/ţ/ă bytes (0xBA/0xFE/0xE3) decode as
+// non-diacritic junk under CP852, so a genuine CP1250 file wins on score. Falls back to
+// UTF-8 lossy (the pre-fix behavior) when no candidate scores at all — e.g. an
+// ASCII-only file with no diacritics anywhere in the sample.
+const SAMPLE_SIZE: usize = 16;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DbfCodePage {
     Cp852,
@@ -241,40 +260,75 @@ fn open_reader_with(
 }
 
 /// Does `record`'s Character fields, taken together, look like a correctly-decoded
-/// Romanian string? Mirrors the old `decode_ro_string` scoring heuristic, but applied
-/// to an already-decoded `Record` (each candidate encoding decodes at the dbase level,
-/// not via a post-hoc byte reinterpretation).
-fn record_looks_like_ro(record: &Record) -> bool {
-    let mut any_diacritic = false;
+/// Romanian string under the candidate encoding it was read with? Mirrors the old
+/// `decode_ro_string` per-record scoring heuristic, but applied to an already-decoded
+/// `Record` (each candidate encoding decodes at the dbase level, not via a post-hoc
+/// byte reinterpretation). A single U+FFFD anywhere in the record disqualifies it
+/// (returns `false`) even if another field also contains a valid diacritic.
+fn record_ro_score(record: &Record) -> Option<usize> {
+    let mut occurrences = 0usize;
     for (_, value) in record.clone().into_iter() {
         if let FieldValue::Character(Some(s)) = &value {
             if s.contains('\u{FFFD}') {
-                return false;
+                return None; // a correct code page never lossy-replaces
             }
-            if s.chars().any(|c| RO_DIACRITICS.contains(&c)) {
-                any_diacritic = true;
-            }
+            occurrences += s.chars().filter(|c| RO_DIACRITICS.contains(c)).count();
         }
     }
-    any_diacritic
+    Some(occurrences)
 }
 
-/// Pick the best-scoring codepage for this DBF file by sampling its first record
-/// under each candidate in turn. Returns `None` if no candidate scores (falls back to
-/// UTF-8 lossy, the pre-fix default, at the call site).
+/// Score one candidate encoding against up to `SAMPLE_SIZE` records: the TOTAL number
+/// of RO-diacritic occurrences across the sampled records (a record containing any
+/// U+FFFD contributes nothing). Occurrence counting (not a per-record boolean)
+/// discriminates the CP852↔CP1250 byte collisions better: e.g. real CP1250 ş/ţ bytes
+/// (0xBA/0xFE) decode as box-drawing junk under CP852, so the wrong candidate scores
+/// strictly lower whenever the text has more than the ambiguous î/ţ (0xEE) overlap.
+/// Returns `None` if the reader can't even be opened under this encoding.
+fn score_candidate(bytes: &[u8], cp: DbfCodePage) -> Option<usize> {
+    let mut reader = open_reader_with(bytes, cp).ok()?;
+    let score = reader
+        .iter_records()
+        .take(SAMPLE_SIZE)
+        .filter_map(|r| r.ok())
+        .filter_map(|record| record_ro_score(&record))
+        .sum();
+    Some(score)
+}
+
+/// Pick the best-scoring codepage for this DBF file by sampling up to `SAMPLE_SIZE`
+/// records under each candidate in turn (see the module-level comment above for the
+/// full rationale). Returns `None` if every candidate scores 0 (falls back to UTF-8
+/// lossy, the pre-fix default, at the call site).
 fn pick_dbf_encoding(bytes: &[u8]) -> Option<DbfCodePage> {
-    for cp in [DbfCodePage::Cp852, DbfCodePage::Cp1250, DbfCodePage::Utf8] {
-        let Ok(mut reader) = open_reader_with(bytes, cp) else {
+    let candidates = [DbfCodePage::Cp852, DbfCodePage::Cp1250, DbfCodePage::Utf8];
+
+    let mut best: Option<(DbfCodePage, usize)> = None;
+    for cp in candidates {
+        let Some(score) = score_candidate(bytes, cp) else {
             continue;
         };
-        let Some(Ok(first)) = reader.iter_records().next() else {
+        if score == 0 {
             continue;
-        };
-        if record_looks_like_ro(&first) {
-            return Some(cp);
         }
+        best = Some(match best {
+            None => (cp, score),
+            Some((best_cp, best_score)) => {
+                if score > best_score {
+                    (cp, score)
+                } else {
+                    // Tie (or worse) keeps the earlier candidate — CP852 first, the
+                    // historical SAGA MS-DOS default. A CP852↔CP1250 tie only happens
+                    // when the text's ONLY diacritics sit on the ambiguous 0xEE byte
+                    // (CP852 'ţ' ↔ CP1250 'î'), which is undecidable without a
+                    // dictionary; any real CP1250 ş/ţ/ă (0xBA/0xFE/0xE3) decodes as
+                    // non-diacritic junk under CP852 and wins on score instead.
+                    (best_cp, best_score)
+                }
+            }
+        });
     }
-    None
+    best.map(|(cp, _)| cp)
 }
 
 /// Open the real reader for `bytes`, using the best-scoring codepage (see
@@ -737,7 +791,7 @@ mod tests {
     /// Same as `write_dbf`, but writes Character fields under an explicit encoding —
     /// i.e. what a real MS-DOS/Windows-era SAGA export actually looks like on disk,
     /// instead of dbase's `UnicodeLossy` (UTF-8) writer default.
-    fn write_dbf_with_encoding<E: dbase::Encoding + 'static>(
+    pub(super) fn write_dbf_with_encoding<E: dbase::Encoding + 'static>(
         encoding: E,
         fields: &[&str],
         rows: Vec<Vec<(&str, &str)>>,
@@ -935,6 +989,63 @@ mod tests {
     }
 
     #[test]
+    fn pick_dbf_encoding_prefers_cp1250_across_multiple_records_despite_0xee_collision() {
+        // Regression for the single-record picker's mis-detection bug: CP852 and CP1250
+        // share byte 0xEE, which decodes as 'ţ' (U+0163) under CP852 but as 'î' (U+00EE)
+        // under CP1250 — both valid `RO_DIACRITICS`, so a picker that only samples the
+        // FIRST record can pick CP852 for a genuinely-CP1250 file whenever that first
+        // record happens to contain an 0xEE byte (CP852 is tried first in the candidate
+        // list). Here the first record is exactly that kind of ambiguous single-diacritic
+        // record ("Rîu" — only the collision byte, no other diacritic), while the
+        // following records are UNAMBIGUOUSLY CP1250-only (ș/ț-adjacent cedilla forms in
+        // positions CP852 does not share). The file-wide, multi-record score must prefer
+        // CP1250 because it wins on the majority of sampled records, even though a
+        // first-record-only heuristic would tie or favor CP852.
+        let fields = ["DENUMIRE"];
+        let rows = vec![
+            vec![("DENUMIRE", "Rîu")], // ambiguous: 'î' only exists via the 0xEE collision
+            vec![("DENUMIRE", "Ploieşti")],
+            vec![("DENUMIRE", "Constanţa")],
+            vec![("DENUMIRE", "Bacău")],
+            vec![("DENUMIRE", "Craiova Distribuţie")],
+        ];
+        let bytes = write_dbf_cp1250(&fields, rows);
+
+        let chosen = pick_dbf_encoding(&bytes);
+        assert!(
+            matches!(chosen, Some(DbfCodePage::Cp1250)),
+            "multi-record scoring must prefer CP1250 for a genuinely CP1250 file even \
+             when the first record is 0xEE-ambiguous: got {chosen:?}"
+        );
+    }
+
+    #[test]
+    fn pick_dbf_encoding_breaks_genuine_tie_in_favor_of_cp852() {
+        // A file whose only Character content is the single 0xEE byte scores IDENTICALLY
+        // under CP852 (-> 'ţ') and CP1250 (-> 'î'): both are valid RO_DIACRITICS, neither
+        // produces U+FFFD — a genuine, dictionary-undecidable tie. The tie keeps the
+        // earlier candidate: CP852, the historical SAGA MS-DOS default (this also keeps a
+        // genuine CP852 file containing only 'ţ' — e.g. "Constanţa" — decoding correctly).
+        // A real CP1250 file is NOT affected: its ş/ţ/ă bytes (0xBA/0xFE/0xE3) decode as
+        // non-diacritic junk under CP852, so CP1250 wins on score, not on the tie-break.
+        let fields = ["DENUMIRE"];
+        // Written under CP1250 so the on-disk byte truly is 0xEE either way (both
+        // candidate encodings map the ASCII portion identically; only 0xEE differs).
+        let rows = vec![vec![("DENUMIRE", "î")]];
+        let bytes = write_dbf_cp1250(&fields, rows);
+
+        // Sanity: both candidates must actually score 1 (a genuine tie), not just one.
+        assert_eq!(score_candidate(&bytes, DbfCodePage::Cp852), Some(1));
+        assert_eq!(score_candidate(&bytes, DbfCodePage::Cp1250), Some(1));
+
+        let chosen = pick_dbf_encoding(&bytes);
+        assert!(
+            matches!(chosen, Some(DbfCodePage::Cp852)),
+            "a genuine CP852/CP1250 tie must keep the CP852 default: got {chosen:?}"
+        );
+    }
+
+    #[test]
     fn pick_dbf_encoding_falls_back_to_none_for_plain_ascii() {
         // A plain-ASCII file has no diacritics to score on — no candidate wins,
         // and `open_dbf_reader` falls back to the crate default (UnicodeLossy),
@@ -1093,5 +1204,22 @@ mod tests {
             "RO123",
             "sample must match first row value"
         );
+    }
+}
+
+#[cfg(test)]
+mod scratch_probe {
+    use super::tests::write_dbf_with_encoding;
+    use super::*;
+
+    #[test]
+    fn probe_bytes() {
+        for (label, byte) in [("EE", 0xEEu8), ("AD", 0xADu8), ("8C", 0x8Cu8), ("C7", 0xC7u8)] {
+            let s = unsafe { String::from_utf8_unchecked(vec![byte]) };
+            // We can't easily build a raw single-byte string via the safe String API since
+            // it must be valid UTF-8; instead route through write_dbf_with_encoding using
+            // a Latin-1-ish trick: encode a placeholder char whose codepoint round-trips.
+            let _ = (label, s);
+        }
     }
 }

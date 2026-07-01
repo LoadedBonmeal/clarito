@@ -807,7 +807,20 @@ export function SettingsPage() {
             </SetRow>
             <SetRow title={t("settings.anaf.sync.title")} desc={t("settings.anaf.sync.desc")}>
               {/* propunere — neimplementat: interval de sincronizare configurabil */}
-              <span className="tog on" onClick={() => notify.info(t("settings.notify.comingSoon"))} />
+              <span
+                className="tog on"
+                role="switch"
+                aria-checked
+                aria-label={t("settings.anaf.sync.title")}
+                tabIndex={0}
+                onClick={() => notify.info(t("settings.notify.comingSoon"))}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    notify.info(t("settings.notify.comingSoon"));
+                  }
+                }}
+              />
             </SetRow>
             <SetRow
               title={t("settings.anaf.advanced.title")}
@@ -1258,13 +1271,33 @@ export function SettingsPage() {
             <SetRow title={t("settings.template.words.title")} desc={t("settings.template.words.desc")}>
               <span
                 className={`tog${templateShowWords ? " on" : ""}`}
+                role="switch"
+                aria-checked={templateShowWords}
+                aria-label={t("settings.template.words.title")}
+                tabIndex={0}
                 onClick={() => setTemplateShowWords((v) => !v)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    setTemplateShowWords((v) => !v);
+                  }
+                }}
               />
             </SetRow>
             <SetRow title={t("settings.template.vatDetail.title")} desc={t("settings.template.vatDetail.desc")}>
               <span
                 className={`tog${templateShowVatDetail ? " on" : ""}`}
+                role="switch"
+                aria-checked={templateShowVatDetail}
+                aria-label={t("settings.template.vatDetail.title")}
+                tabIndex={0}
                 onClick={() => setTemplateShowVatDetail((v) => !v)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    setTemplateShowVatDetail((v) => !v);
+                  }
+                }}
               />
             </SetRow>
             <div className="card-pad" style={{ paddingTop: 12, display: "flex", gap: 8, alignItems: "center" }}>
@@ -1471,7 +1504,17 @@ export function SettingsPage() {
             <SetRow title={t("settings.notifications.quiet.title")} desc={t("settings.notifications.quiet.desc")}>
               <span
                 className={`tog${(quietHoursSetting ?? "0") === "1" ? " on" : ""}`}
+                role="switch"
+                aria-checked={(quietHoursSetting ?? "0") === "1"}
+                aria-label={t("settings.notifications.quiet.title")}
+                tabIndex={0}
                 onClick={() => void handleNotifToggle("quiet_hours", (quietHoursSetting ?? "0") !== "1")}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    void handleNotifToggle("quiet_hours", (quietHoursSetting ?? "0") !== "1");
+                  }
+                }}
               />
             </SetRow>
           </div>
@@ -1548,12 +1591,27 @@ export function SettingsPage() {
             >
               <span
                 className={`tog${autostartEnabled ? " on" : ""}`}
+                role="switch"
+                aria-checked={autostartEnabled}
+                aria-label={t("settings.system.autostart.title")}
+                tabIndex={0}
                 onClick={async () => {
                   try {
                     await api.system.setAutostart(!autostartEnabled);
                     void queryClient.invalidateQueries({ queryKey: queryKeys.system.autostart });
                   } catch (err) {
                     notify.error(formatError(err, t("settings.notify.autostartFailed")));
+                  }
+                }}
+                onKeyDown={async (e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    try {
+                      await api.system.setAutostart(!autostartEnabled);
+                      void queryClient.invalidateQueries({ queryKey: queryKeys.system.autostart });
+                    } catch (err) {
+                      notify.error(formatError(err, t("settings.notify.autostartFailed")));
+                    }
                   }
                 }}
               />
