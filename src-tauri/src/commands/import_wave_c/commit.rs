@@ -797,7 +797,22 @@ async fn commit_invoices(
                     }
                 };
 
-                // Build CreateLineInputs.
+                // Build CreateLineInputs. WinMentor .txt values are Romanian and commonly use a COMMA
+                // decimal separator; a raw parse::<f64>() does not accept "1234,56" → it silently
+                // returned Err → unwrap_or(0.0/1.0), committing an invoice with ZEROED amounts and no
+                // error surfaced. Use the comma-aware parse_decimal (disambiguates "1.234,56" /
+                // "1,234.56") and surface a warning for any non-empty-but-unparseable value instead of
+                // silently substituting a default.
+                let mut line_warnings: Vec<String> = Vec::new();
+                let parse_line_num =
+                    |opt: Option<&str>, field: String, default: f64, w: &mut Vec<String>| -> f64 {
+                        match opt.map(str::trim).filter(|s| !s.is_empty()) {
+                            None => default,
+                            Some(s) => super::xml_common::parse_decimal(s, &field, w)
+                                .and_then(|d| d.to_string().parse::<f64>().ok())
+                                .unwrap_or(default),
+                        }
+                    };
                 let create_lines: Vec<invoices::CreateLineInput> = lines
                     .into_iter()
                     .filter_map(|(name, qty, unit, price, vat_rate, vat_cat)| {
@@ -805,18 +820,24 @@ async fn commit_invoices(
                         if n.is_empty() {
                             return None;
                         }
-                        let quantity = qty
-                            .as_deref()
-                            .and_then(|s| s.trim().parse::<f64>().ok())
-                            .unwrap_or(1.0);
-                        let unit_price = price
-                            .as_deref()
-                            .and_then(|s| s.trim().parse::<f64>().ok())
-                            .unwrap_or(0.0);
-                        let vat = vat_rate
-                            .as_deref()
-                            .and_then(|s| s.trim().parse::<f64>().ok())
-                            .unwrap_or(0.0);
+                        let quantity = parse_line_num(
+                            qty.as_deref(),
+                            format!("cantitate (linia \"{n}\")"),
+                            1.0,
+                            &mut line_warnings,
+                        );
+                        let unit_price = parse_line_num(
+                            price.as_deref(),
+                            format!("preț unitar (linia \"{n}\")"),
+                            0.0,
+                            &mut line_warnings,
+                        );
+                        let vat = parse_line_num(
+                            vat_rate.as_deref(),
+                            format!("cotă TVA (linia \"{n}\")"),
+                            0.0,
+                            &mut line_warnings,
+                        );
                         let cat = vat_cat
                             .as_deref()
                             .unwrap_or(if vat > 0.0 { "S" } else { "Z" })
@@ -835,6 +856,11 @@ async fn commit_invoices(
                         })
                     })
                     .collect();
+                for w in line_warnings {
+                    report
+                        .errors
+                        .push(format!("invoice staging {staging_id}: {w}"));
+                }
 
                 if create_lines.is_empty() {
                     set_staging_error(

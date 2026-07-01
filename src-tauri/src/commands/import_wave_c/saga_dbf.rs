@@ -540,6 +540,18 @@ fn parse_as_products(
 ///
 /// This heuristic is per-field so that files with mixed-encoding records
 /// (rare, but observed in older exports) degrade gracefully.
+///
+/// KNOWN LIMITATION (found by the pre-publication audit; deferred, not blind-fixed): `dbase::Reader::new`
+/// decodes character fields with the crate default `UnicodeLossy` (= `String::from_utf8_lossy`) BEFORE
+/// this heuristic runs, so a CP852/CP1250 SAGA file already has its non-UTF-8 diacritic bytes replaced by
+/// U+FFFD by the time we see them — the recovery below then cannot restore ă/â/î/ș/ț (imported
+/// names/addresses are garbled; numeric amounts are unaffected). The clean fix — a lossless
+/// byte-preserving custom `Encoding` passed to `Reader::new_with_encoding` — is BLOCKED by dbase 0.7.0:
+/// it exposes the `Encoding` trait but keeps its `DecodeError`/`EncodeError` return types in a private
+/// `mod error`, so an external impl cannot name them. Viable follow-ups (each needs a real SAGA DBF to
+/// validate, hence deferred): enable the dbase `yore` feature and read via a fixed code page
+/// (`Reader::new_with_encoding(cursor, dbase::yore::code_pages::CP852)`), accepting one encoding; or
+/// upgrade dbase to a release that re-exports the error types so this passthrough becomes possible.
 fn field_value_to_string_decoded(value: &FieldValue) -> String {
     match value {
         FieldValue::Character(Some(s)) => decode_ro_string(s.as_bytes()),
