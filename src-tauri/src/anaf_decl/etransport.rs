@@ -19,6 +19,7 @@ use quick_xml::Writer;
 use serde::Deserialize;
 use std::io::Cursor;
 
+use crate::anaf_decl::saft::masterfiles::uom_to_rec20;
 use crate::error::{AppError, AppResult};
 
 pub const NAMESPACE: &str = "mfp:anaf:dgti:eTransport:declaratie:v2";
@@ -261,6 +262,29 @@ fn clean(s: &str, max: usize) -> String {
     s.chars().filter(|c| !c.is_control()).take(max).collect()
 }
 
+/// UN/ECE Rec-20 codes the app is known to emit (kept in sync with `uom_to_rec20`'s output
+/// range plus "NIU" which ANAF also accepts for unitless counts) — used to make
+/// `normalize_unit_code` idempotent so an already-valid code is never re-mapped.
+const KNOWN_REC20_CODES: &[&str] = &[
+    "H87", "HUR", "KGM", "GRM", "LTR", "MLT", "MTR", "MTK", "MTQ", "KMT", "TNE", "SET", "PR",
+    "MON", "DAY", "NIU",
+];
+
+/// e-Transport `codUnitateMasura` MUST be a UN/ECE Rec 20 code — ANAF rejects a raw Romanian
+/// abbreviation such as lowercase "buc" even though it passes the app's local (non-empty)
+/// check. Route the free-text unit through the shared `uom_to_rec20` mapper, the same one
+/// `ubl::generator` uses for e-Factura lines — but first pass through an already-valid Rec-20
+/// code unchanged (uppercased), since `uom_to_rec20` only recognizes Romanian/English words
+/// and would otherwise silently remap a valid code like "KGM" to the "H87" default.
+fn normalize_unit_code(unit: &str) -> String {
+    let trimmed = unit.trim();
+    let upper = trimmed.to_ascii_uppercase();
+    if KNOWN_REC20_CODES.contains(&upper.as_str()) {
+        return upper;
+    }
+    uom_to_rec20(trimmed).to_string()
+}
+
 /// CUI digits-only (strip an "RO" prefix) — codDeclarant must be digits and must match the CIF
 /// in the upload URL (which is also RO-stripped).
 fn strip_ro(cui: &str) -> String {
@@ -361,7 +385,10 @@ pub fn generate_etransport_xml(d: &EtransportDeclaration) -> AppResult<String> {
         }
         e.push_attribute(("denumireMarfa", clean(&g.denumire_marfa, 200).as_str())); // Str200
         e.push_attribute(("cantitate", dec_attr(g.cantitate).as_str()));
-        e.push_attribute(("codUnitateMasura", clean(&g.cod_unitate_masura, 3).as_str()));
+        e.push_attribute((
+            "codUnitateMasura",
+            clean(&normalize_unit_code(&g.cod_unitate_masura), 3).as_str(),
+        ));
         if let Some(n) = g.greutate_neta {
             e.push_attribute(("greutateNeta", dec_attr(n).as_str()));
         }
@@ -566,6 +593,56 @@ mod tests {
         assert!(xml.contains("<locFinalTraseuRutier>"));
         assert!(xml.contains("tipDocument=\"20\""));
         assert!(xml.contains("</eTransport>"));
+    }
+
+    // FIX 5: codUnitateMasura must be a UN/ECE Rec 20 code — ANAF rejects a raw
+    // Romanian abbreviation such as lowercase "buc" (it passes the app's local
+    // non-empty check but is not a valid Rec 20 code). Route it through the same
+    // `uom_to_rec20` mapper `ubl::generator` uses for e-Factura lines.
+    #[test]
+    fn buc_unit_normalized_to_rec20_h87() {
+        let mut d = sample();
+        d.goods[0].cod_unitate_masura = "buc".into();
+        let xml = generate_etransport_xml(&d).unwrap();
+        assert!(
+            xml.contains("codUnitateMasura=\"H87\""),
+            "unit 'buc' must be normalized to Rec 20 code H87, got: {}",
+            xml
+        );
+        assert!(
+            !xml.contains("codUnitateMasura=\"buc\""),
+            "raw 'buc' must NOT appear as codUnitateMasura"
+        );
+    }
+
+    #[test]
+    fn valid_rec20_code_passes_through_unchanged() {
+        // "KGM" (already emitted by `sample()`) must NOT be remapped — uom_to_rec20 only
+        // recognizes Romanian/English words, not Rec-20 codes themselves, so naive routing
+        // would otherwise default a valid code to H87.
+        for code in ["KGM", "MTQ", "HUR", "H87", "NIU"] {
+            let mut d = sample();
+            d.goods[0].cod_unitate_masura = code.into();
+            let xml = generate_etransport_xml(&d).unwrap();
+            assert!(
+                xml.contains(&format!("codUnitateMasura=\"{code}\"")),
+                "valid Rec-20 code '{code}' must pass through unchanged, got: {}",
+                xml
+            );
+        }
+    }
+
+    #[test]
+    fn lowercase_rec20_code_normalized_to_uppercase() {
+        // A lowercase Rec-20 code (e.g. from an old import) is uppercased, not remapped.
+        let mut d = sample();
+        d.goods[0].cod_unitate_masura = "kgm".into();
+        let xml = generate_etransport_xml(&d).unwrap();
+        assert!(
+            xml.contains("codUnitateMasura=\"KGM\""),
+            "lowercase 'kgm' must be uppercased to 'KGM', got: {}",
+            xml
+        );
     }
 
     #[test]

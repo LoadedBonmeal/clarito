@@ -138,11 +138,53 @@ pub fn generate_ubl(input: &GeneratorInput) -> AppResult<String> {
             .map_err(|e| AppError::Xml(e.to_string()))?;
     }
 
+    // BR-O-02/11..14: an invoice with a category "O" line ("în afara sferei TVA") must NOT
+    // carry a Seller/Buyer VAT identifier (PartyTaxScheme[TaxScheme=VAT]) and must not mix O
+    // with any other VAT category. Compute once and thread to both party writers.
+    let has_o_line = input.lines.iter().any(|l| l.vat_category == "O");
+
     // ── AccountingSupplierParty ──────────────────────────────────────────────
-    write_supplier_party(&mut writer, seller)?;
+    write_supplier_party(&mut writer, seller, has_o_line)?;
 
     // ── AccountingCustomerParty ──────────────────────────────────────────────
-    write_customer_party(&mut writer, buyer, currency)?;
+    write_customer_party(&mut writer, buyer, currency, has_o_line)?;
+
+    // ── Delivery (EN16931 BR-IC-11/BR-IC-12) ─────────────────────────────────
+    // An invoice with any category "K" line (intra-EU supply) must contain the actual
+    // delivery date (BT-72) or invoicing period (BG-14), AND the Deliver-to country
+    // (BT-80). We emit ActualDeliveryDate = issue date + DeliveryLocation/Country from
+    // the buyer's country. UBL element order: cac:Delivery MUST come after
+    // AccountingCustomerParty (no PayeeParty/TaxRepresentativeParty in this generator)
+    // and before cac:PaymentMeans.
+    let has_k_line = input.lines.iter().any(|l| l.vat_category == "K");
+    if has_k_line {
+        writer
+            .write_event(Event::Start(BytesStart::new("cac:Delivery")))
+            .map_err(|e| AppError::Xml(e.to_string()))?;
+        write_text(&mut writer, "cbc:ActualDeliveryDate", &inv.issue_date)?;
+        writer
+            .write_event(Event::Start(BytesStart::new("cac:DeliveryLocation")))
+            .map_err(|e| AppError::Xml(e.to_string()))?;
+        writer
+            .write_event(Event::Start(BytesStart::new("cac:Address")))
+            .map_err(|e| AppError::Xml(e.to_string()))?;
+        writer
+            .write_event(Event::Start(BytesStart::new("cac:Country")))
+            .map_err(|e| AppError::Xml(e.to_string()))?;
+        write_text(&mut writer, "cbc:IdentificationCode", &buyer.country)?;
+        writer
+            .write_event(Event::End(BytesEnd::new("cac:Country")))
+            .map_err(|e| AppError::Xml(e.to_string()))?;
+        writer
+            .write_event(Event::End(BytesEnd::new("cac:Address")))
+            .map_err(|e| AppError::Xml(e.to_string()))?;
+        writer
+            .write_event(Event::End(BytesEnd::new("cac:DeliveryLocation")))
+            .map_err(|e| AppError::Xml(e.to_string()))?;
+        writer
+            .write_event(Event::End(BytesEnd::new("cac:Delivery")))
+            .map_err(|e| AppError::Xml(e.to_string()))?;
+    }
 
     // ── PaymentMeans (BR-RO-100) ─────────────────────────────────────────────
     writer
@@ -232,7 +274,11 @@ pub fn generate_ubl(input: &GeneratorInput) -> AppResult<String> {
 
 // ─── Supplier party ──────────────────────────────────────────────────────────
 
-fn write_supplier_party(writer: &mut Writer<Cursor<Vec<u8>>>, seller: &Company) -> AppResult<()> {
+fn write_supplier_party(
+    writer: &mut Writer<Cursor<Vec<u8>>>,
+    seller: &Company,
+    has_o_line: bool,
+) -> AppResult<()> {
     writer
         .write_event(Event::Start(BytesStart::new("cac:AccountingSupplierParty")))
         .map_err(|e| AppError::Xml(e.to_string()))?;
@@ -254,12 +300,13 @@ fn write_supplier_party(writer: &mut Writer<Cursor<Vec<u8>>>, seller: &Company) 
         .write_event(Event::Start(BytesStart::new("cac:PostalAddress")))
         .map_err(|e| AppError::Xml(e.to_string()))?;
     write_text(writer, "cbc:StreetName", &seller.address)?;
-    write_text(writer, "cbc:CityName", &seller.city)?;
+    let subentity = county_to_nuts(&seller.county);
     write_text(
         writer,
-        "cbc:CountrySubentity",
-        &county_to_nuts(&seller.county),
+        "cbc:CityName",
+        &bucharest_city_name(&seller.county, &seller.city, &subentity),
     )?;
+    write_text(writer, "cbc:CountrySubentity", &subentity)?;
     writer
         .write_event(Event::Start(BytesStart::new("cac:Country")))
         .map_err(|e| AppError::Xml(e.to_string()))?;
@@ -271,34 +318,34 @@ fn write_supplier_party(writer: &mut Writer<Cursor<Vec<u8>>>, seller: &Company) 
         .write_event(Event::End(BytesEnd::new("cac:PostalAddress")))
         .map_err(|e| AppError::Xml(e.to_string()))?;
 
-    // PartyTaxScheme
-    writer
-        .write_event(Event::Start(BytesStart::new("cac:PartyTaxScheme")))
-        .map_err(|e| AppError::Xml(e.to_string()))?;
-    let seller_cui_digits = seller
-        .cui
-        .trim()
-        .trim_start_matches("RO")
-        .trim_start_matches("ro");
-    // BIZ-02: only VAT-registered sellers get the "RO" prefix in PartyTaxScheme/CompanyID
-    let supplier_cui_xml = if seller.vat_payer {
-        format!("RO{}", seller_cui_digits)
-    } else {
-        seller_cui_digits.to_string()
-    };
-    write_text(writer, "cbc:CompanyID", &supplier_cui_xml)?;
-    writer
-        .write_event(Event::Start(BytesStart::new("cac:TaxScheme")))
-        .map_err(|e| AppError::Xml(e.to_string()))?;
-    write_text(writer, "cbc:ID", "VAT")?;
-    writer
-        .write_event(Event::End(BytesEnd::new("cac:TaxScheme")))
-        .map_err(|e| AppError::Xml(e.to_string()))?;
-    writer
-        .write_event(Event::End(BytesEnd::new("cac:PartyTaxScheme")))
-        .map_err(|e| AppError::Xml(e.to_string()))?;
+    // PartyTaxScheme — BR-CO-09: only emitted for VAT-registered sellers (CompanyID must carry
+    // the ISO country prefix under TaxScheme=VAT). BR-O-02: an invoice with any category "O"
+    // line must not carry the seller VAT identifier at all, regardless of vat_payer.
+    if seller.vat_payer && !has_o_line {
+        writer
+            .write_event(Event::Start(BytesStart::new("cac:PartyTaxScheme")))
+            .map_err(|e| AppError::Xml(e.to_string()))?;
+        let seller_cui_digits = seller
+            .cui
+            .trim()
+            .trim_start_matches("RO")
+            .trim_start_matches("ro");
+        let supplier_cui_xml = format!("RO{}", seller_cui_digits);
+        write_text(writer, "cbc:CompanyID", &supplier_cui_xml)?;
+        writer
+            .write_event(Event::Start(BytesStart::new("cac:TaxScheme")))
+            .map_err(|e| AppError::Xml(e.to_string()))?;
+        write_text(writer, "cbc:ID", "VAT")?;
+        writer
+            .write_event(Event::End(BytesEnd::new("cac:TaxScheme")))
+            .map_err(|e| AppError::Xml(e.to_string()))?;
+        writer
+            .write_event(Event::End(BytesEnd::new("cac:PartyTaxScheme")))
+            .map_err(|e| AppError::Xml(e.to_string()))?;
+    }
 
-    // PartyLegalEntity
+    // PartyLegalEntity — BR-CO-26: the seller must carry an identifier (CompanyID) here
+    // regardless of VAT-registration status, so this stays unconditional.
     writer
         .write_event(Event::Start(BytesStart::new("cac:PartyLegalEntity")))
         .map_err(|e| AppError::Xml(e.to_string()))?;
@@ -323,6 +370,7 @@ fn write_customer_party(
     writer: &mut Writer<Cursor<Vec<u8>>>,
     buyer: &Contact,
     _currency: &str,
+    has_o_line: bool,
 ) -> AppResult<()> {
     writer
         .write_event(Event::Start(BytesStart::new("cac:AccountingCustomerParty")))
@@ -347,11 +395,16 @@ fn write_customer_party(
     if let Some(addr) = &buyer.address {
         write_text(writer, "cbc:StreetName", addr)?;
     }
+    let buyer_subentity = buyer.county.as_deref().map(county_to_nuts);
     if let Some(city) = &buyer.city {
-        write_text(writer, "cbc:CityName", city)?;
+        let city_out = match &buyer_subentity {
+            Some(se) => bucharest_city_name(buyer.county.as_deref().unwrap_or(""), city, se),
+            None => city.clone(),
+        };
+        write_text(writer, "cbc:CityName", &city_out)?;
     }
-    if let Some(county) = &buyer.county {
-        write_text(writer, "cbc:CountrySubentity", &county_to_nuts(county))?;
+    if let Some(se) = &buyer_subentity {
+        write_text(writer, "cbc:CountrySubentity", se)?;
     }
     writer
         .write_event(Event::Start(BytesStart::new("cac:Country")))
@@ -364,41 +417,46 @@ fn write_customer_party(
         .write_event(Event::End(BytesEnd::new("cac:PostalAddress")))
         .map_err(|e| AppError::Xml(e.to_string()))?;
 
-    // PartyTaxScheme — doar dacă buyerul are CUI
-    if let Some(cui) = &buyer.cui {
-        writer
-            .write_event(Event::Start(BytesStart::new("cac:PartyTaxScheme")))
-            .map_err(|e| AppError::Xml(e.to_string()))?;
-        // BIZ-03: emit the original VAT ID for non-RO buyers; only RO buyers get the
-        // "RO" prefix normalization. If the stored CUI already begins with a
-        // two-letter ISO country code (e.g. "DE123456789"), keep it as-is.
-        let trimmed = cui.trim();
-        let country_code = buyer.country.trim().to_ascii_uppercase();
-        let starts_with_country_prefix = trimmed.len() >= 2
-            && trimmed.as_bytes()[0].is_ascii_alphabetic()
-            && trimmed.as_bytes()[1].is_ascii_alphabetic();
-        let buyer_cui_xml = if starts_with_country_prefix {
-            // Caller already provided VAT-ID with country prefix — trust it.
-            trimmed.to_string()
-        } else if country_code.is_empty() || country_code == "RO" {
-            format!("RO{}", trimmed)
-        } else {
-            // Non-RO buyer with no country prefix in the stored value: synthesize it
-            // from the buyer's country so the EU VAT ID (BT-48) is well-formed
-            // (e.g. "DE123456789") — CIUS/Schematron rejects an unprefixed foreign VAT ID.
-            format!("{country_code}{trimmed}")
-        };
-        write_text(writer, "cbc:CompanyID", &buyer_cui_xml)?;
-        writer
-            .write_event(Event::Start(BytesStart::new("cac:TaxScheme")))
-            .map_err(|e| AppError::Xml(e.to_string()))?;
-        write_text(writer, "cbc:ID", "VAT")?;
-        writer
-            .write_event(Event::End(BytesEnd::new("cac:TaxScheme")))
-            .map_err(|e| AppError::Xml(e.to_string()))?;
-        writer
-            .write_event(Event::End(BytesEnd::new("cac:PartyTaxScheme")))
-            .map_err(|e| AppError::Xml(e.to_string()))?;
+    // PartyTaxScheme — BR-CO-09/BR-O-02: only emitted when the buyer is VAT-registered
+    // AND the invoice has no category "O" line. Previously this synthesized a "RO"+CUI
+    // VAT identifier for ANY Romanian buyer with a CUI on file, which falsely asserted
+    // VAT registration for non-VAT-payer buyers (a core e-Factura user class).
+    if buyer.vat_payer && !has_o_line {
+        if let Some(cui) = &buyer.cui {
+            writer
+                .write_event(Event::Start(BytesStart::new("cac:PartyTaxScheme")))
+                .map_err(|e| AppError::Xml(e.to_string()))?;
+            // BIZ-03: emit the original VAT ID for non-RO buyers; only RO buyers get the
+            // "RO" prefix normalization. If the stored CUI already begins with a
+            // two-letter ISO country code (e.g. "DE123456789"), keep it as-is.
+            let trimmed = cui.trim();
+            let country_code = buyer.country.trim().to_ascii_uppercase();
+            let starts_with_country_prefix = trimmed.len() >= 2
+                && trimmed.as_bytes()[0].is_ascii_alphabetic()
+                && trimmed.as_bytes()[1].is_ascii_alphabetic();
+            let buyer_cui_xml = if starts_with_country_prefix {
+                // Caller already provided VAT-ID with country prefix — trust it.
+                trimmed.to_string()
+            } else if country_code.is_empty() || country_code == "RO" {
+                format!("RO{}", trimmed)
+            } else {
+                // Non-RO buyer with no country prefix in the stored value: synthesize it
+                // from the buyer's country so the EU VAT ID (BT-48) is well-formed
+                // (e.g. "DE123456789") — CIUS/Schematron rejects an unprefixed foreign VAT ID.
+                format!("{country_code}{trimmed}")
+            };
+            write_text(writer, "cbc:CompanyID", &buyer_cui_xml)?;
+            writer
+                .write_event(Event::Start(BytesStart::new("cac:TaxScheme")))
+                .map_err(|e| AppError::Xml(e.to_string()))?;
+            write_text(writer, "cbc:ID", "VAT")?;
+            writer
+                .write_event(Event::End(BytesEnd::new("cac:TaxScheme")))
+                .map_err(|e| AppError::Xml(e.to_string()))?;
+            writer
+                .write_event(Event::End(BytesEnd::new("cac:PartyTaxScheme")))
+                .map_err(|e| AppError::Xml(e.to_string()))?;
+        }
     }
 
     // PartyLegalEntity
@@ -476,7 +534,11 @@ fn write_tax_total(
             .write_event(Event::Start(BytesStart::new("cac:TaxCategory")))
             .map_err(|e| AppError::Xml(e.to_string()))?;
         write_text(writer, "cbc:ID", category)?;
-        write_text(writer, "cbc:Percent", rate_str)?;
+        // BR-O-08 family: category "O" ("în afara sferei TVA") must NOT carry cbc:Percent.
+        // Every other category (incl. Z/E/AE/K/G at 0.00) still emits it.
+        if category != "O" {
+            write_text(writer, "cbc:Percent", rate_str)?;
+        }
         // BIZ-05: emit exemption code for non-standard categories
         write_tax_exemption(writer, category)?;
         writer
@@ -556,7 +618,10 @@ fn write_invoice_line(
         .write_event(Event::Start(BytesStart::new("cac:ClassifiedTaxCategory")))
         .map_err(|e| AppError::Xml(e.to_string()))?;
     write_text(writer, "cbc:ID", &line.vat_category)?;
-    write_text(writer, "cbc:Percent", &format_decimal_2(&line.vat_rate))?;
+    // BR-O-05: an "O" line's ClassifiedTaxCategory must NOT contain cbc:Percent.
+    if line.vat_category != "O" {
+        write_text(writer, "cbc:Percent", &format_decimal_2(&line.vat_rate))?;
+    }
     // BIZ-05: line-level exemption code (mirrors TaxSubtotal/TaxCategory)
     write_tax_exemption(writer, &line.vat_category)?;
     writer
@@ -799,6 +864,37 @@ pub(crate) fn county_to_nuts(raw: &str) -> String {
     }
 }
 
+/// Extracts a sector digit (1-6) from a free-text county or city string, e.g.
+/// "Sector 3", "SECTOR3", "sector  1". Returns `None` when no sector digit is found.
+pub(crate) fn extract_sector_digit(s: &str) -> Option<u8> {
+    let lower = s.to_lowercase();
+    let idx = lower.find("sector")?;
+    let rest = &lower[idx + "sector".len()..];
+    let digit = rest.chars().find(|c| !c.is_whitespace() && *c != '.')?;
+    if digit.is_ascii_digit() {
+        let n = digit.to_digit(10).unwrap_or(0) as u8;
+        if (1..=6).contains(&n) {
+            return Some(n);
+        }
+    }
+    None
+}
+
+/// CIUS-RO BR-RO-100/101 (OMF 1366/2021): when the resolved `CountrySubentity` is the
+/// Bucharest code "RO-B", `cbc:CityName` MUST be one of "SECTOR1".."SECTOR6" — not the
+/// free-text city name. Looks for a sector digit in both the county and city fields
+/// (whichever carries it). When no sector digit can be found, the raw city is returned
+/// unchanged (the rocius preflight rule surfaces a clear error to the user in that case).
+pub(crate) fn bucharest_city_name(county: &str, city: &str, subentity: &str) -> String {
+    if subentity != "RO-B" {
+        return city.to_string();
+    }
+    extract_sector_digit(county)
+        .or_else(|| extract_sector_digit(city))
+        .map(|n| format!("SECTOR{n}"))
+        .unwrap_or_else(|| city.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1002,8 +1098,9 @@ mod tests {
 
     #[test]
     fn non_vat_payer_seller_omits_ro_prefix() {
-        // BIZ-02: a non-VAT-registered seller must NOT have the "RO" prefix on
-        // its PartyTaxScheme/CompanyID.
+        // BR-CO-09: a non-VAT-registered seller must NOT emit a PartyTaxScheme[VAT] at
+        // all (bare-digit CompanyID under TaxScheme=VAT is itself a fatal schematron
+        // violation — the whole block must be omitted, not just left un-prefixed).
         let mut input = sample_input();
         input.seller.vat_payer = false;
         input.seller.cui = "12345678".to_string();
@@ -1011,21 +1108,112 @@ mod tests {
 
         // Strip BOM for substring search clarity.
         let body = xml.trim_start_matches('\u{FEFF}');
-        // Supplier PartyTaxScheme block must contain the bare digits, not "RO…".
-        assert!(
-            body.contains("<cbc:CompanyID>12345678</cbc:CompanyID>"),
-            "expected bare CUI in supplier PartyTaxScheme, got: {}",
-            body
-        );
-        // And specifically should not produce "RO12345678" in the supplier party.
-        // (PartyLegalEntity may still carry the raw stored value.)
         let supplier_block = body
             .split("</cac:AccountingSupplierParty>")
             .next()
             .unwrap_or(body);
+        // No PartyTaxScheme block at all in the supplier party for a non-VAT-payer.
+        assert!(
+            !supplier_block.contains("cac:PartyTaxScheme"),
+            "non-VAT-payer seller must NOT emit any PartyTaxScheme, got: {}",
+            supplier_block
+        );
         assert!(
             !supplier_block.contains("RO12345678"),
             "supplier party should not contain RO-prefixed CUI for non-VAT-payer"
+        );
+        // BT-30/BR-CO-26: PartyLegalEntity must still carry the bare CIF.
+        assert!(
+            supplier_block.contains("<cbc:CompanyID>12345678</cbc:CompanyID>"),
+            "expected bare CUI in supplier PartyLegalEntity, got: {}",
+            supplier_block
+        );
+    }
+
+    #[test]
+    fn non_vat_seller_ro_buyer_o_line_omits_vat_schemes_and_percent() {
+        // Regression for the fatal BR-CO-09 / BR-O-02 / BR-O-05 combination: a
+        // non-VAT-payer seller issuing an out-of-scope ("O") line to an RO buyer must
+        // produce an XML with NO PartyTaxScheme[VAT] on either party, NO cbc:Percent
+        // inside the O line's ClassifiedTaxCategory/TaxSubtotal, but must still carry
+        // VATEX-EU-O and both parties' PartyLegalEntity CompanyID.
+        let mut input = sample_input();
+        input.seller.vat_payer = false;
+        input.seller.cui = "12345678".to_string();
+        input.buyer.vat_payer = false;
+        input.buyer.cui = Some("87654321".to_string());
+        input.buyer.country = "RO".to_string();
+        input.lines[0].vat_category = "O".to_string();
+        input.lines[0].vat_rate = "0.00".to_string();
+        input.lines[0].vat_amount = "0.00".to_string();
+        input.invoice.vat_amount = "0.00".to_string();
+        input.invoice.total_amount = input.invoice.subtotal_amount.clone();
+
+        let xml = generate_ubl(&input).expect("should generate XML");
+        let body = xml.trim_start_matches('\u{FEFF}');
+
+        // No TaxScheme[ID=VAT] anywhere inside either party's PartyTaxScheme block —
+        // simplest robust check: no "cac:PartyTaxScheme" element at all in the party
+        // sections (TaxScheme "VAT" only ever appears there or in TaxCategory, which is
+        // a different, always-required element and not what BR-O-02 forbids).
+        let supplier_block = body
+            .split("</cac:AccountingSupplierParty>")
+            .next()
+            .unwrap_or(body);
+        let customer_block = body
+            .split("</cac:AccountingCustomerParty>")
+            .nth(0)
+            .unwrap_or(body);
+        assert!(
+            !supplier_block.contains("cac:PartyTaxScheme"),
+            "seller must have no PartyTaxScheme when non-VAT-payer, got: {}",
+            supplier_block
+        );
+        assert!(
+            !customer_block.contains("cac:PartyTaxScheme"),
+            "buyer must have no PartyTaxScheme for a non-VAT-payer buyer, got: {}",
+            customer_block
+        );
+
+        // O line's ClassifiedTaxCategory must not contain cbc:Percent.
+        let item_block = body
+            .split("<cac:ClassifiedTaxCategory>")
+            .nth(1)
+            .and_then(|s| s.split("</cac:ClassifiedTaxCategory>").next())
+            .unwrap_or("");
+        assert!(
+            !item_block.contains("cbc:Percent"),
+            "O line ClassifiedTaxCategory must not contain cbc:Percent, got: {}",
+            item_block
+        );
+
+        // O TaxSubtotal/TaxCategory must not contain cbc:Percent either.
+        let subtotal_block = body
+            .split("<cac:TaxSubtotal>")
+            .nth(1)
+            .and_then(|s| s.split("</cac:TaxSubtotal>").next())
+            .unwrap_or("");
+        assert!(
+            !subtotal_block.contains("cbc:Percent"),
+            "O TaxSubtotal/TaxCategory must not contain cbc:Percent, got: {}",
+            subtotal_block
+        );
+
+        // VATEX-EU-O must still be present.
+        assert!(
+            body.contains("VATEX-EU-O"),
+            "expected VATEX-EU-O exemption code, got: {}",
+            body
+        );
+
+        // PartyLegalEntity CompanyID present for both parties (bare CIF).
+        assert!(
+            supplier_block.contains("<cbc:CompanyID>12345678</cbc:CompanyID>"),
+            "seller PartyLegalEntity must carry bare CIF"
+        );
+        assert!(
+            customer_block.contains("<cbc:CompanyID>87654321</cbc:CompanyID>"),
+            "buyer PartyLegalEntity must carry bare CIF"
         );
     }
 
@@ -1203,6 +1391,149 @@ mod tests {
             customer_block.contains("<cbc:CountrySubentity>RO-CJ</cbc:CountrySubentity>"),
             "buyer county 'Cluj' must be emitted as 'RO-CJ', got: {}",
             customer_block
+        );
+    }
+
+    // ── FIX 2: Bucharest sector CityName (CIUS-RO BR-RO-100/101) ─────────────
+
+    #[test]
+    fn extract_sector_digit_finds_digit_in_various_forms() {
+        assert_eq!(extract_sector_digit("Sector 3"), Some(3));
+        assert_eq!(extract_sector_digit("SECTOR3"), Some(3));
+        assert_eq!(extract_sector_digit("sector  1"), Some(1));
+        assert_eq!(extract_sector_digit("Sector 6"), Some(6));
+        assert_eq!(extract_sector_digit("Sector 7"), None);
+        assert_eq!(extract_sector_digit("Cluj"), None);
+    }
+
+    #[test]
+    fn bucharest_city_name_maps_sector_when_ro_b() {
+        assert_eq!(
+            bucharest_city_name("Sector 3", "București", "RO-B"),
+            "SECTOR3"
+        );
+        // Sector digit found in city instead of county.
+        assert_eq!(bucharest_city_name("", "Sector 2", "RO-B"), "SECTOR2");
+        // No sector digit extractable — city left unchanged.
+        assert_eq!(
+            bucharest_city_name("București", "București", "RO-B"),
+            "București"
+        );
+        // Not Bucharest — city untouched.
+        assert_eq!(bucharest_city_name("Cluj", "Cluj-Napoca", "RO-CJ"), "Cluj-Napoca");
+    }
+
+    #[test]
+    fn seller_bucharest_sector_emitted_as_sector_city_name() {
+        // Seller county "Sector 1" (from sample_input) resolves to RO-B; CityName
+        // must be normalized to "SECTOR1", not the free-text "București".
+        let input = sample_input(); // seller.county = "Sector 1", seller.city = "București"
+        let xml = generate_ubl(&input).expect("should generate XML");
+        let body = xml.trim_start_matches('\u{FEFF}');
+        let supplier_block = body
+            .split("</cac:AccountingSupplierParty>")
+            .next()
+            .unwrap_or(body);
+        assert!(
+            supplier_block.contains("<cbc:CityName>SECTOR1</cbc:CityName>"),
+            "seller Bucharest CityName must be 'SECTOR1', got: {}",
+            supplier_block
+        );
+    }
+
+    #[test]
+    fn buyer_bucharest_sector_emitted_as_sector_city_name() {
+        let mut input = sample_input();
+        input.buyer.county = Some("Sector 4".to_string());
+        input.buyer.city = Some("București".to_string());
+        let xml = generate_ubl(&input).expect("should generate XML");
+        let body = xml.trim_start_matches('\u{FEFF}');
+        let customer_block = body
+            .split("</cac:AccountingCustomerParty>")
+            .next()
+            .unwrap_or(body);
+        assert!(
+            customer_block.contains("<cbc:CityName>SECTOR4</cbc:CityName>"),
+            "buyer Bucharest CityName must be 'SECTOR4', got: {}",
+            customer_block
+        );
+    }
+
+    #[test]
+    fn non_bucharest_city_name_unchanged() {
+        // Cluj buyer (from sample_input) must keep its free-text city name as-is.
+        let input = sample_input(); // buyer.city = Some("Cluj-Napoca")
+        let xml = generate_ubl(&input).expect("should generate XML");
+        let body = xml.trim_start_matches('\u{FEFF}');
+        let customer_block = body
+            .split("</cac:AccountingCustomerParty>")
+            .next()
+            .unwrap_or(body);
+        assert!(
+            customer_block.contains("<cbc:CityName>Cluj-Napoca</cbc:CityName>"),
+            "non-Bucharest buyer city must be unchanged, got: {}",
+            customer_block
+        );
+    }
+
+    // ── FIX 3: intra-EU K delivery info (EN16931 BR-IC-11/BR-IC-12) ───────────
+
+    #[test]
+    fn k_line_invoice_emits_delivery_with_date_and_buyer_country() {
+        let mut input = sample_input();
+        input.buyer.country = "DE".to_string();
+        input.lines[0].vat_category = "K".to_string();
+        input.lines[0].vat_rate = "0.00".to_string();
+        input.lines[0].vat_amount = "0.00".to_string();
+        input.invoice.vat_amount = "0.00".to_string();
+        input.invoice.total_amount = input.invoice.subtotal_amount.clone();
+
+        let xml = generate_ubl(&input).expect("should generate XML");
+        let body = xml.trim_start_matches('\u{FEFF}');
+
+        assert!(
+            body.contains("<cac:Delivery>"),
+            "K-line invoice must contain cac:Delivery, got: {}",
+            body
+        );
+        let delivery_block = body
+            .split("<cac:Delivery>")
+            .nth(1)
+            .and_then(|s| s.split("</cac:Delivery>").next())
+            .unwrap_or("");
+        assert!(
+            delivery_block.contains(&format!(
+                "<cbc:ActualDeliveryDate>{}</cbc:ActualDeliveryDate>",
+                input.invoice.issue_date
+            )),
+            "Delivery must contain the ActualDeliveryDate, got: {}",
+            delivery_block
+        );
+        assert!(
+            delivery_block.contains("<cbc:IdentificationCode>DE</cbc:IdentificationCode>"),
+            "Delivery must contain the buyer country code, got: {}",
+            delivery_block
+        );
+
+        // Element order: cac:Delivery after AccountingCustomerParty, before PaymentMeans.
+        let acp_end = body.find("</cac:AccountingCustomerParty>").expect("acp end");
+        let delivery_start = body.find("<cac:Delivery>").expect("delivery start");
+        let payment_start = body.find("<cac:PaymentMeans>").expect("payment start");
+        assert!(
+            acp_end < delivery_start && delivery_start < payment_start,
+            "cac:Delivery must sit between AccountingCustomerParty and PaymentMeans"
+        );
+    }
+
+    #[test]
+    fn non_k_line_invoice_has_no_delivery() {
+        let input = sample_input(); // category "S" only
+        let xml = generate_ubl(&input).expect("should generate XML");
+        let body = xml.trim_start_matches('\u{FEFF}');
+        assert!(
+            !body.contains("cac:Delivery"),
+            "non-K-line invoice must NOT contain cac:Delivery, got: {}",
+            body
         );
     }
 

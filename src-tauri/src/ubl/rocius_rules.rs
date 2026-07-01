@@ -11,6 +11,7 @@ use rust_decimal::Decimal;
 use crate::db::companies::Company;
 use crate::db::contacts::Contact;
 use crate::db::invoices::{Invoice, LineItem};
+use crate::ubl::generator::{county_to_nuts, extract_sector_digit};
 
 pub struct RuleContext<'a> {
     pub invoice: &'a Invoice,
@@ -83,6 +84,11 @@ pub fn run_all(ctx: &RuleContext<'_>) -> (Vec<String>, Vec<String>) {
     // ── Storno (BR-RO-050..051) ───────────────────────────────────────────
     check!(rule_br_ro_050_storno_needs_billing_ref);
     check!(rule_br_ro_051_storno_lines_negative);
+
+    // ── EN16931 category "O" / Bucharest sector (BR-O-xx / BR-RO-100..101) ──
+    check!(rule_o_category_not_mixed_with_others);
+    check!(rule_o_category_seller_not_vat_payer);
+    check!(rule_bucharest_sector_required);
 
     // ── Warnings (non-blocking) ────────────────────────────────────────────
     warn!(warn_br_ro_w01_due_far_future);
@@ -699,6 +705,78 @@ fn rule_br_ro_051_storno_lines_negative(ctx: &RuleContext<'_>) -> Option<String>
                     .collect::<Vec<_>>()
                     .join(", ")
             ));
+        }
+    }
+    None
+}
+
+// ─── EN16931 category "O" / Bucharest sector rules ────────────────────────────
+
+/// BR-O-11..14: an invoice with a category "O" ("în afara sferei TVA") line must NOT
+/// also contain any other VAT category (S/Z/E/AE/K/G) — O-breakdown invoices must be
+/// homogeneous.
+fn rule_o_category_not_mixed_with_others(ctx: &RuleContext<'_>) -> Option<String> {
+    let has_o = ctx.lines.iter().any(|l| l.vat_category == "O");
+    let has_other = ctx.lines.iter().any(|l| l.vat_category != "O");
+    if has_o && has_other {
+        Some(
+            "[BR-O-11] O factură cu o linie categorie TVA 'O' (în afara sferei TVA) nu poate \
+             conține și alte categorii TVA (S/Z/E/AE/K/G). Separați liniile pe facturi distincte."
+                .into(),
+        )
+    } else {
+        None
+    }
+}
+
+/// BR-O-02: an invoice containing a category "O" line must not contain the Seller VAT
+/// identifier (BT-31). A VAT-registered seller emitting an "O" line is contradictory —
+/// the generator would otherwise have to suppress the seller's own VAT identifier.
+fn rule_o_category_seller_not_vat_payer(ctx: &RuleContext<'_>) -> Option<String> {
+    let has_o = ctx.lines.iter().any(|l| l.vat_category == "O");
+    if has_o && ctx.supplier.vat_payer {
+        Some(
+            "[BR-O-02] Furnizorul este plătitor de TVA dar factura conține o linie cu \
+             categoria TVA 'O' (în afara sferei TVA). Un plătitor de TVA nu poate emite linii \
+             'O' — verificați categoria TVA a liniilor sau statutul de plătitor al furnizorului."
+                .into(),
+        )
+    } else {
+        None
+    }
+}
+
+/// CIUS-RO BR-RO-100/101 (OMF 1366/2021): when the seller or buyer's county resolves to
+/// the Bucharest subdivision code "RO-B", cbc:CityName must be "SECTOR1".."SECTOR6" — a
+/// sector digit must be extractable from either the county or city field.
+fn rule_bucharest_sector_required(ctx: &RuleContext<'_>) -> Option<String> {
+    let seller_subentity = county_to_nuts(&ctx.supplier.county);
+    if seller_subentity == "RO-B"
+        && extract_sector_digit(&ctx.supplier.county)
+            .or_else(|| extract_sector_digit(&ctx.supplier.city))
+            .is_none()
+    {
+        return Some(
+            "[BR-RO-100] Adresa furnizorului din București necesită sectorul (ex. «Sector 3») \
+             pentru e-Factura. Completați sectorul în câmpul județ sau localitate."
+                .into(),
+        );
+    }
+    if let Some(county) = &ctx.buyer.county {
+        let buyer_subentity = county_to_nuts(county);
+        if buyer_subentity == "RO-B" {
+            let city = ctx.buyer.city.as_deref().unwrap_or("");
+            if extract_sector_digit(county)
+                .or_else(|| extract_sector_digit(city))
+                .is_none()
+            {
+                return Some(
+                    "[BR-RO-101] Adresa cumpărătorului din București necesită sectorul (ex. \
+                     «Sector 3») pentru e-Factura. Completați sectorul în câmpul județ sau \
+                     localitate."
+                        .into(),
+                );
+            }
         }
     }
     None
@@ -1534,6 +1612,244 @@ mod tests {
         assert!(
             !has_043,
             "BR-RO-043 must not fire when multi-rate within one category is correctly grouped, got: {:?}",
+            errors
+        );
+    }
+
+    // ── FIX 4a: BR-O-11 O-mixing rule ─────────────────────────────────────────
+
+    #[test]
+    fn o_mixed_with_other_category_fails_br_o_11() {
+        let invoice = sample_invoice();
+        let mut o_line = sample_line();
+        o_line.vat_category = "O".into();
+        o_line.vat_rate = "0.00".into();
+        o_line.vat_amount = "0.00".into();
+        let mut s_line = sample_line();
+        s_line.id = "line-2".into();
+        s_line.position = 2;
+        let lines = vec![o_line, s_line];
+        let supplier = sample_supplier();
+        let buyer = sample_buyer();
+        let ctx = RuleContext {
+            invoice: &invoice,
+            lines: &lines,
+            supplier: &supplier,
+            buyer: &buyer,
+            storno_ref: None,
+        };
+        let (errors, _) = run_all(&ctx);
+        let has_o11 = errors.iter().any(|e| e.contains("[BR-O-11]"));
+        assert!(
+            has_o11,
+            "Expected BR-O-11 error when mixing category O with other categories, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn o_only_invoice_passes_br_o_11() {
+        let invoice = sample_invoice();
+        let mut o_line = sample_line();
+        o_line.vat_category = "O".into();
+        o_line.vat_rate = "0.00".into();
+        o_line.vat_amount = "0.00".into();
+        let lines = vec![o_line];
+        let mut supplier = sample_supplier();
+        supplier.vat_payer = false; // avoid tripping BR-O-02 in this test
+        let buyer = sample_buyer();
+        let ctx = RuleContext {
+            invoice: &invoice,
+            lines: &lines,
+            supplier: &supplier,
+            buyer: &buyer,
+            storno_ref: None,
+        };
+        let (errors, _) = run_all(&ctx);
+        let has_o11 = errors.iter().any(|e| e.contains("[BR-O-11]"));
+        assert!(
+            !has_o11,
+            "BR-O-11 must not fire for an all-O invoice, got: {:?}",
+            errors
+        );
+    }
+
+    // ── FIX 4b: BR-O-02 O + VAT-payer seller rule ─────────────────────────────
+
+    #[test]
+    fn o_line_with_vat_payer_seller_fails_br_o_02() {
+        let invoice = sample_invoice();
+        let mut o_line = sample_line();
+        o_line.vat_category = "O".into();
+        o_line.vat_rate = "0.00".into();
+        o_line.vat_amount = "0.00".into();
+        let lines = vec![o_line];
+        let mut supplier = sample_supplier();
+        supplier.vat_payer = true; // contradictory with an O line
+        let buyer = sample_buyer();
+        let ctx = RuleContext {
+            invoice: &invoice,
+            lines: &lines,
+            supplier: &supplier,
+            buyer: &buyer,
+            storno_ref: None,
+        };
+        let (errors, _) = run_all(&ctx);
+        let has_o02 = errors.iter().any(|e| e.contains("[BR-O-02]"));
+        assert!(
+            has_o02,
+            "Expected BR-O-02 error for O line with VAT-payer seller, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn o_line_with_non_vat_payer_seller_passes_br_o_02() {
+        let invoice = sample_invoice();
+        let mut o_line = sample_line();
+        o_line.vat_category = "O".into();
+        o_line.vat_rate = "0.00".into();
+        o_line.vat_amount = "0.00".into();
+        let lines = vec![o_line];
+        let mut supplier = sample_supplier();
+        supplier.vat_payer = false;
+        let buyer = sample_buyer();
+        let ctx = RuleContext {
+            invoice: &invoice,
+            lines: &lines,
+            supplier: &supplier,
+            buyer: &buyer,
+            storno_ref: None,
+        };
+        let (errors, _) = run_all(&ctx);
+        let has_o02 = errors.iter().any(|e| e.contains("[BR-O-02]"));
+        assert!(
+            !has_o02,
+            "BR-O-02 must not fire for O line with non-VAT-payer seller, got: {:?}",
+            errors
+        );
+    }
+
+    // ── FIX 4c: Bucharest sector preflight rule ───────────────────────────────
+
+    #[test]
+    fn bucharest_seller_without_sector_fails() {
+        let invoice = sample_invoice();
+        let lines = vec![sample_line()];
+        let mut supplier = sample_supplier();
+        supplier.county = "Bucuresti".into(); // resolves to RO-B, no sector digit
+        supplier.city = "Bucuresti".into();
+        let buyer = sample_buyer();
+        let ctx = RuleContext {
+            invoice: &invoice,
+            lines: &lines,
+            supplier: &supplier,
+            buyer: &buyer,
+            storno_ref: None,
+        };
+        let (errors, _) = run_all(&ctx);
+        let has_100 = errors.iter().any(|e| e.contains("[BR-RO-100]"));
+        assert!(
+            has_100,
+            "Expected BR-RO-100 error for Bucharest seller without a sector, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn bucharest_seller_with_sector_passes() {
+        let invoice = sample_invoice();
+        let lines = vec![sample_line()];
+        let mut supplier = sample_supplier();
+        supplier.county = "Sector 3".into();
+        supplier.city = "Bucuresti".into();
+        let buyer = sample_buyer();
+        let ctx = RuleContext {
+            invoice: &invoice,
+            lines: &lines,
+            supplier: &supplier,
+            buyer: &buyer,
+            storno_ref: None,
+        };
+        let (errors, _) = run_all(&ctx);
+        let has_100 = errors.iter().any(|e| e.contains("[BR-RO-100]"));
+        assert!(
+            !has_100,
+            "BR-RO-100 must not fire when the seller county carries a sector, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn bucharest_buyer_without_sector_fails() {
+        let invoice = sample_invoice();
+        let lines = vec![sample_line()];
+        let supplier = sample_supplier();
+        let mut buyer = sample_buyer();
+        buyer.county = Some("Bucuresti".into());
+        buyer.city = Some("Bucuresti".into());
+        let ctx = RuleContext {
+            invoice: &invoice,
+            lines: &lines,
+            supplier: &supplier,
+            buyer: &buyer,
+            storno_ref: None,
+        };
+        let (errors, _) = run_all(&ctx);
+        let has_101 = errors.iter().any(|e| e.contains("[BR-RO-101]"));
+        assert!(
+            has_101,
+            "Expected BR-RO-101 error for Bucharest buyer without a sector, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn bucharest_buyer_with_sector_in_city_passes() {
+        let invoice = sample_invoice();
+        let lines = vec![sample_line()];
+        let supplier = sample_supplier();
+        let mut buyer = sample_buyer();
+        buyer.county = Some("Bucuresti".into());
+        buyer.city = Some("Sector 5".into());
+        let ctx = RuleContext {
+            invoice: &invoice,
+            lines: &lines,
+            supplier: &supplier,
+            buyer: &buyer,
+            storno_ref: None,
+        };
+        let (errors, _) = run_all(&ctx);
+        let has_101 = errors.iter().any(|e| e.contains("[BR-RO-101]"));
+        assert!(
+            !has_101,
+            "BR-RO-101 must not fire when the buyer city carries a sector, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn non_bucharest_addresses_never_trigger_sector_rule() {
+        // valid_invoice_has_no_errors already covers the happy path (Ilfov/Cluj-Napoca),
+        // but assert explicitly that neither BR-RO-100 nor BR-RO-101 ever fire for them.
+        let invoice = sample_invoice();
+        let lines = vec![sample_line()];
+        let supplier = sample_supplier(); // county = "Ilfov"
+        let buyer = sample_buyer(); // county = Some("Cluj")
+        let ctx = RuleContext {
+            invoice: &invoice,
+            lines: &lines,
+            supplier: &supplier,
+            buyer: &buyer,
+            storno_ref: None,
+        };
+        let (errors, _) = run_all(&ctx);
+        let has_sector_err = errors
+            .iter()
+            .any(|e| e.contains("[BR-RO-100]") || e.contains("[BR-RO-101]"));
+        assert!(
+            !has_sector_err,
+            "non-Bucharest addresses must never trigger the sector rule, got: {:?}",
             errors
         );
     }
