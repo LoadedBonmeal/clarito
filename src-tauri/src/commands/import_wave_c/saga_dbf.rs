@@ -1206,25 +1206,3 @@ mod tests {
         );
     }
 }
-
-#[cfg(test)]
-mod scratch_probe {
-    use super::tests::write_dbf_with_encoding;
-    use super::*;
-
-    #[test]
-    fn probe_bytes() {
-        for (label, byte) in [
-            ("EE", 0xEEu8),
-            ("AD", 0xADu8),
-            ("8C", 0x8Cu8),
-            ("C7", 0xC7u8),
-        ] {
-            let s = unsafe { String::from_utf8_unchecked(vec![byte]) };
-            // We can't easily build a raw single-byte string via the safe String API since
-            // it must be valid UTF-8; instead route through write_dbf_with_encoding using
-            // a Latin-1-ish trick: encode a placeholder char whose codepoint round-trips.
-            let _ = (label, s);
-        }
-    }
-}

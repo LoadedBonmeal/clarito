@@ -1162,7 +1162,7 @@ mod tests {
             .unwrap_or(body);
         let customer_block = body
             .split("</cac:AccountingCustomerParty>")
-            .nth(0)
+            .next()
             .unwrap_or(body);
         assert!(
             !supplier_block.contains("cac:PartyTaxScheme"),

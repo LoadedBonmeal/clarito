@@ -379,7 +379,7 @@ mod tests {
         let value = "eyJhbGciOiJSUzI1NiJ9.".to_string() + &"x".repeat(1800);
         let chunks = chunk_string(&value, CHUNK_MAX);
         assert!(
-            chunks.len() >= 1,
+            !chunks.is_empty(),
             "un JWT de 1.8KB ar trebui să încapă într-o singură bucată de {CHUNK_MAX}"
         );
         assert!(chunks.iter().all(|c| c.len() <= CHUNK_MAX));

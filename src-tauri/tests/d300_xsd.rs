@@ -952,11 +952,12 @@ fn d300_wave7_intra_eu_services() {
 /// Prior bug: Z/K/E were all dumped into R1_1, and G was accumulated NOWHERE
 /// (silently dropped from the whole declaration — a P1 finding). This scenario
 /// exercises the corrected routing end-to-end (XSD + DUK):
-///   - K (2000, intra-EU)  → R1_1 = 2000 (rd.1 = ONLY art. 294(2)(a)/(d))
-///   - Z (1000) + G (3000) → R14_1 = 4000 (rd.14 scutite CU drept de deducere:
-///                           export art. 294(1) + zero-rated; G previously vanished)
-///   - E (4000, exempt)    → R15_1 = 4000 (rd.15 fără drept; previously wrongly in R1_1)
-///   - a 21% S sale (1000/210) so the totals aren't degenerate
+/// - K (2000, intra-EU): R1_1 = 2000 (rd.1 = ONLY art. 294(2)(a)/(d))
+/// - Z (1000) + G (3000): R14_1 = 4000 (rd.14 scutite CU drept de deducere — export
+///   art. 294(1) + zero-rated; G previously vanished)
+/// - E (4000, exempt): R15_1 = 4000 (rd.15 fără drept; previously wrongly in R1_1)
+/// - a 21% S sale (1000/210) so the totals aren't degenerate
+///
 /// Must pass XSD AND DUK ("Validare fara erori").
 #[test]
 fn d300_wave3_audit_fix1_zkge_sales_routing() {
