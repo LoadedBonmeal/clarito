@@ -250,12 +250,33 @@ pub fn tax_description(category: &str, rate: Decimal) -> String {
 //
 //   ID = "00" + CUI-digits   (IDType prefix "00" + Romanian CUI without "RO" prefix)
 //
-// Verified empirically:
-//   "00" + 8-digit-valid-CUI  → valid only if checkCUI passes
-//   "00" + 9-digit-valid-CUI  → valid
-//   "0"  (bare zero string)   → always valid (DUK sentinel for "no partner")
+// Verified empirically against the bundled ANAF D406Validator.jar (DUKIntegrator), by
+// feeding a real generated D406 XML through it with different candidate id values and
+// reading the resulting `eroare regula` / `.err.txt` output directly (no source available
+// for the closed validator, so this is black-box, not decompiled):
+//   "00" + 8/9-digit-valid-CUI (passes checkCUI)      → valid
+//   "0"  (bare zero string)                            → valid ONLY as the "no partner"
+//         side of a CustomerID/SupplierID pair whose OTHER side is non-"0" and itself
+//         maps to a real MasterFiles/Customer|Supplier record. It is REJECTED as a
+//         standalone SupplierID/RegistrationNumber on an actual Supplier record ("nu
+//         poate fi 0") and REJECTED when both CustomerID and SupplierID are "0" on the
+//         same transaction ("nu pot fi ambele simultan 0").
+//   "08" + anything (the previously-assumed "anonymized partner" bucket)
+//                                                       → ALWAYS REJECTED ("formatul este
+//         invalid"), regardless of the digits/length after the prefix. This bucket was
+//         never actually run through the real DUK validator before (no prior test fed an
+//         "08..." id through it), so the rejection went unnoticed until a foreign-supplier
+//         regression fixture (recv-2 in tests/saft_xsd.rs) exercised it end-to-end.
+//   "04" + up to 33 alphanumeric chars (`[A-Za-z0-9]+`, no other characters, ≤35 total)
+//                                                       → valid, and NOT checked against
+//         checkCUI (arbitrary alphanumeric content passes, including the literal foreign
+//         VAT digits or an internal record id). IDType "04" ("alt cod de identificare
+//         fiscală" in the D406 IDType enum) is the correct SAF-T slot for a non-Romanian
+//         or otherwise-unidentifiable partner — a much better semantic fit than the
+//         all-zero "08" bucket ever was, and it happens to be DUK-valid where "08" is not.
 //
-// Use "0" as the no-partner sentinel (the DUK explicitly accepts the bare "0").
+// Use "0" as the no-partner sentinel (still DUK-accepted as the "absent" side of a pair)
+// and "04" + sanitized-alphanumeric as the concrete-but-non-Romanian-CUI identifier.
 pub fn canonical_partner_id(id: &str, cui: &str) -> String {
     if !cui.is_empty() {
         let stripped = strip_ro(cui);
@@ -263,15 +284,33 @@ pub fn canonical_partner_id(id: &str, cui: &str) -> String {
             // Romanian CUI: prefix with IDType "00"
             return format!("00{}", stripped);
         }
+        // Non-numeric / foreign VAT id (e.g. "DE811234567"): IDType "04" + the CUI's own
+        // alphanumeric characters (DUK rejects anything outside [A-Za-z0-9]), truncated to
+        // fit the 35-char total limit. Two different foreign CUIs get two different ids
+        // (unlike the old all-zero bucket, which collapsed every foreign partner into one
+        // dangling/invalid record).
+        let alnum: String = stripped
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric())
+            .collect();
+        if !alnum.is_empty() {
+            return format!("04{}", &alnum[..alnum.len().min(33)]);
+        }
     }
-    // No CUI: distinguish a real-but-unidentified partner (has an internal id) —
-    // emit the DUK-accepted anonymized ID — from a genuinely absent partner ("0").
-    // (Multiple unidentified partners share the anonymized id; acceptable since they
-    // are, by definition, anonymized.)
+    // No usable CUI at all: distinguish a real-but-unidentified partner (has an internal
+    // id) — emit a DUK-valid IDType "04" id derived from that internal id — from a
+    // genuinely absent partner ("0", only legal as the empty side of a pair).
     if id.trim().is_empty() {
         "0".to_string()
     } else {
-        "080000000000000".to_string()
+        let alnum: String = id.chars().filter(|c| c.is_ascii_alphanumeric()).collect();
+        if alnum.is_empty() {
+            // Internal id has no alphanumeric characters at all (should not happen for real
+            // ids) — fall back to the "no partner" sentinel rather than emit an invalid id.
+            "0".to_string()
+        } else {
+            format!("04{}", &alnum[..alnum.len().min(33)])
+        }
     }
 }
 
@@ -583,12 +622,26 @@ pub async fn write_suppliers(
         end_elem(w, "Supplier")?;
     }
 
-    // Also include distinct issuers from received_invoices not already covered
+    // Also include distinct issuers from received_invoices not already covered.
+    //
+    // MUST use the SAME canonical id as the GL/SourceDocuments (db/gl.rs `post_purchase_invoice`,
+    // source_docs.rs), which compute `canonical_partner_id(received_invoice_id, issuer_cui)` with a
+    // NON-empty received_invoice id. Since `canonical_partner_id` now derives the id from the CUI
+    // itself whenever `cui` is non-empty (IDType "00"+digits for a numeric Romanian CUI, IDType
+    // "04"+alphanumeric for a foreign/non-numeric one — see its doc comment), the `id` argument here
+    // only matters when `issuer_cui` is empty, which the `WHERE ri.issuer_cui != ''` clause below
+    // already excludes. A representative received_invoice id (MIN(ri.id)) is still selected per
+    // issuer for defensiveness/consistency with the GL's call signature, but a numeric OR foreign CUI
+    // resolves to the exact same id regardless of which invoice `rid` came from — unlike the old
+    // all-zero "080000000000000" bucket (rejected outright by the real DUK validator; see the
+    // superseded KNOWN LIMITATION note this replaced), every distinct foreign CUI now gets its own
+    // valid Supplier record, matching the GL/SourceDocuments' per-CUI id exactly.
     let recv_rows = sqlx::query(
-        "SELECT DISTINCT ri.issuer_cui, ri.issuer_name \
+        "SELECT ri.issuer_cui, ri.issuer_name, MIN(ri.id) AS rid \
          FROM received_invoices ri \
          WHERE ri.company_id = ?1 \
            AND ri.issuer_cui != '' \
+         GROUP BY ri.issuer_cui, ri.issuer_name \
          ORDER BY ri.issuer_name",
     )
     .bind(company_id)
@@ -598,26 +651,12 @@ pub async fn write_suppliers(
     for row in &recv_rows {
         let issuer_cui: String = row.try_get("issuer_cui").unwrap_or_default();
         let issuer_name: String = row.try_get("issuer_name").unwrap_or_default();
-        // Use CUI as dedup key
-        // Canonical ID for received invoice issuers = "00" + RO-stripped CUI digits
-        //
-        // KNOWN LIMITATION (found by the pre-publication audit; deferred): this uses
-        // canonical_partner_id("", cui) with an EMPTY id, whereas the GL posts received-invoice
-        // suppliers with canonical_partner_id(received_invoice_id, cui) (db/gl.rs). For a FOREIGN VAT id
-        // (non-numeric, e.g. "DE811234") the CUI branch is skipped, so here the empty id yields "0" →
-        // this loop `continue`s and emits NO Supplier record, but the GL/SourceDocuments carry the
-        // anonymized id "080000000000000" → a dangling SupplierID with no MasterFiles/Suppliers entry
-        // (a referential-integrity gap the D406 validator may flag). It only bites a foreign-CUI issuer
-        // that is NOT also a saved no-CUI contact (the contacts loop above already emits the
-        // "080000000000000" bucket in that case). Correct fix: emit one anonymized Supplier record for
-        // the "080000000000000" bucket whenever any received-invoice issuer maps to it (with its GL
-        // balance), then re-validate against the official Ro_SAFT XSD + DUK. Deferred to keep this a
-        // tested, XSD-validated change rather than a blind edit.
-        let issuer_canon_id = canonical_partner_id("", &issuer_cui);
-        if issuer_cui.is_empty()
-            || issuer_canon_id == "0"
-            || !emitted_cuis.insert(issuer_canon_id.clone())
-        {
+        let rid: String = row.try_get("rid").unwrap_or_default();
+        // Canonical ID for received invoice issuers = "00" + RO-stripped CUI digits (numeric CUI),
+        // else the anonymized bucket keyed off a real received_invoice id — same as the GL/
+        // SourceDocuments, so SupplierID always resolves to an emitted MasterFiles/Suppliers entry.
+        let issuer_canon_id = canonical_partner_id(&rid, &issuer_cui);
+        if issuer_cui.is_empty() || !emitted_cuis.insert(issuer_canon_id.clone()) {
             continue;
         }
         start_elem(w, "Supplier")?;
@@ -1193,12 +1232,21 @@ mod tests {
         // RO CUI → IDType "00" + the bare digits (RO prefix stripped).
         assert_eq!(canonical_partner_id("anything", "RO12345678"), "0012345678");
         assert_eq!(canonical_partner_id("anything", "12345678"), "0012345678");
-        // No CUI but a real internal id → the DUK-accepted anonymized partner id.
-        assert_eq!(canonical_partner_id("contact-7", ""), "080000000000000");
+        // No CUI but a real internal id → IDType "04" + the sanitized internal id
+        // (empirically DUK-valid; the old all-zero "08..." bucket was NOT — see the
+        // doc comment on `canonical_partner_id`).
+        assert_eq!(canonical_partner_id("contact-7", ""), "04contact7");
         // No CUI and no id → genuinely absent partner.
         assert_eq!(canonical_partner_id("", ""), "0");
-        // Non-numeric CUI (foreign / malformed) → treated as unidentified, not "00<garbage>".
-        assert_eq!(canonical_partner_id("c1", "DE811234"), "080000000000000");
+        // Non-numeric CUI (foreign / malformed) → IDType "04" + the CUI's own alphanumeric
+        // characters, NOT "00<garbage>" and NOT the invalid all-zero "08..." bucket.
+        assert_eq!(canonical_partner_id("c1", "DE811234"), "04DE811234");
+        // Two different foreign CUIs must map to two different ids (unlike the old bucket,
+        // which collapsed every foreign/unidentified partner onto the same invalid id).
+        assert_ne!(
+            canonical_partner_id("c1", "DE811234"),
+            canonical_partner_id("c2", "AT811234567")
+        );
     }
 
     #[test]

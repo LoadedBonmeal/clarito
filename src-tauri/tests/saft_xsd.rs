@@ -248,6 +248,36 @@ async fn setup_test_pool(company: &Company) -> sqlx::SqlitePool {
     .await
     .unwrap();
 
+    // ── Seed a FOREIGN-issuer received invoice (Fix A regression guard) ──────
+    // A non-numeric/foreign VAT id (German-style "DE811234567") must land in
+    // MasterFiles/Suppliers under the SAME id ("04DE811234567", IDType "04" +
+    // alphanumeric CUI) that the GL and SourceDocuments reference via
+    // `canonical_partner_id(received_invoice_id, cui)`. Reverse-charge (AE) line so
+    // post_purchase_invoice's GL posting exercises the foreign-supplier path without
+    // needing an extra VAT rate bucket.
+    sqlx::query(
+        "INSERT INTO received_invoices \
+         (id, company_id, anaf_download_id, anaf_index, issuer_cui, issuer_name, \
+          series, number, total_amount, net_amount, vat_amount, currency, exchange_rate, \
+          issue_date, xml_path, pdf_path, status, is_advance, downloaded_at, created_at) \
+         VALUES ('recv-2',?,'DL-2',NULL,'DE811234567','FOREIGN SUPPLIER GMBH',\
+                 'INV','100',300.00,'300.00','0.00','RON',NULL,'2025-01-18',\
+                 '','','APPROVED',0,0,0)",
+    )
+    .bind(&company.id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    sqlx::query(
+        "INSERT INTO received_invoice_vat_lines \
+         (id, received_invoice_id, vat_rate, vat_category, base_amount, vat_amount) \
+         VALUES ('rvl-2','recv-2','19','AE','300.00','0.00')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
     // ── Seed payments ──────────────────────────────────────────────────────────
     sqlx::query(
         "INSERT INTO payments \
@@ -436,6 +466,70 @@ async fn saft_d406_validates_against_official_xsd() {
             }
             None => eprintln!("SKIP DUK: bundled jre-min/D406Validator not present"),
         }
+    }
+}
+
+// ── Fix A regression: foreign-supplier SupplierID must not dangle ─────────────
+//
+// A foreign/non-numeric issuer CUI (e.g. "DE811234567", seeded as recv-2 in
+// setup_test_pool) must resolve to the SAME canonical id in MasterFiles/Suppliers as in
+// GeneralLedgerEntries/SourceDocuments — "04DE811234567" (IDType "04" + the CUI's own
+// alphanumeric characters; see the doc comment on `canonical_partner_id` in
+// masterfiles.rs) — so no SupplierID is referenced without a matching MasterFiles entry.
+// This id (rather than the previously-assumed all-zero "080000000000000" anonymized
+// bucket) is required because the real bundled ANAF D406Validator (DUKIntegrator)
+// rejects "08..." outright as an invalid SupplierID format — confirmed empirically by
+// running the validator directly against candidate ids — while "04"+alphanumeric passes.
+#[tokio::test]
+async fn saft_d406_foreign_supplier_id_matches_gl_and_masterfiles() {
+    let company = test_company();
+    let pool = setup_test_pool(&company).await;
+
+    generate_gl_entries(&pool, &company.id, "2025-01-01", "2025-01-31", false)
+        .await
+        .expect("generate_gl_entries must not fail");
+
+    let xml = generate_saft_xml(&pool, &company, "2025-01-01", "2025-01-31")
+        .await
+        .expect("generate_saft_xml must not fail");
+
+    const FOREIGN_SUPPLIER_ID: &str = "04DE811234567";
+
+    // 1) MasterFiles/Suppliers must contain a Supplier record for this id.
+    let masterfiles_end = xml.find("<GeneralLedgerEntries>").unwrap_or(xml.len());
+    let masterfiles_section = &xml[..masterfiles_end];
+    assert!(
+        masterfiles_section.contains(&format!("<SupplierID>{FOREIGN_SUPPLIER_ID}</SupplierID>")),
+        "MasterFiles/Suppliers must emit SupplierID {FOREIGN_SUPPLIER_ID} for the \
+         foreign-CUI issuer (recv-2, DE811234567) so it isn't a dangling reference: {xml}"
+    );
+
+    // 2) GeneralLedgerEntries / SourceDocuments must reference that SAME id (already did
+    // before the fix — this pins the invariant so the two sides never diverge again).
+    let gle_start = xml
+        .find("<GeneralLedgerEntries>")
+        .expect("GeneralLedgerEntries present");
+    assert!(
+        xml[gle_start..].contains(FOREIGN_SUPPLIER_ID),
+        "GeneralLedgerEntries/SourceDocuments must reference {FOREIGN_SUPPLIER_ID} \
+         for the foreign-CUI issuer: {xml}"
+    );
+
+    // 3) If xmllint is available, also confirm the fixture still validates end-to-end
+    // (belt-and-suspenders alongside the main saft_d406_validates_against_official_xsd test).
+    let xsd_path = Path::new("tools/anaf/Ro_SAFT_Schema_v249_prod.xsd");
+    if xsd_path.exists() && xmllint_available() {
+        let tmp = std::env::temp_dir().join("saft_d406_foreign_supplier_xsd_test.xml");
+        std::fs::write(&tmp, xml.as_bytes()).expect("write temp XML");
+        let result = validate_with_xsd(xsd_path, &tmp).expect("validate_with_xsd must not fail");
+        let _ = std::fs::remove_file(&tmp);
+        assert!(
+            result.passed,
+            "SAF-T D406 XML (with foreign supplier) failed XSD validation. Errors:\n{}",
+            result.errors.join("\n")
+        );
+    } else {
+        eprintln!("SKIP xmllint check in foreign-supplier test: XSD or xmllint not available");
     }
 }
 
