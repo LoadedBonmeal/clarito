@@ -118,6 +118,10 @@
       "inForce": "în vigoare",
       "note": "Facturile și stornările pentru perioade anterioare folosesc automat cotele valabile la data faptului generator."
     },
+    "periodLocks": {
+      "title": "Perioade fiscale blocate",
+      "desc": "Perioadele blocate automat la exportul declarațiilor sau manual de contabil. Deblocați o perioadă doar dacă depuneți o declarație rectificativă — deblocarea permite re-generarea notelor GL și modificarea documentelor din perioadă."
+    },
     "backup": {
       "title": "Backup & restaurare",
       "archiveSize": "arhivă: {{size}}",

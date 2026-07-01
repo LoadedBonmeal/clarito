@@ -31,6 +31,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { useTranslation } from "react-i18next";
 
 import { Ic } from "@/components/shared/Ic";
+import { PeriodLocksPanel } from "@/components/shared/PeriodLocksPanel";
 import { useAnimatedClose } from "@/hooks/use-animated-close";
 import { queryKeys } from "@/lib/queries";
 import { api } from "@/lib/tauri";
@@ -1046,6 +1047,21 @@ export function SettingsPage() {
           {/* P2 Wave 7: configurare salarizare (conturi GL + diurnă + rate 2026) */}
           {activeCompanyId && (
             <PayrollConfigPanel companyId={activeCompanyId} />
+          )}
+
+          {/* perioade fiscale blocate — deblocare manuală (unlock_period, RBAC) */}
+          {activeCompanyId && (
+            <div className="scr-card" style={{ marginBottom: 14 }}>
+              <div className="scr-toolbar">
+                <div className="tt">{t("settings.periodLocks.title")}</div>
+              </div>
+              <div className="card-pad">
+                <p className="muted" style={{ fontSize: 12.5, margin: "0 0 10px" }}>
+                  {t("settings.periodLocks.desc")}
+                </p>
+                <PeriodLocksPanel companyId={activeCompanyId} />
+              </div>
+            </div>
           )}
 
           {/* backup & restaurare */}

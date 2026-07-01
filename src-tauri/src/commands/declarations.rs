@@ -213,39 +213,13 @@ pub async fn validate_declaration_xml(
             )))
         }
     };
-    // Jar-ul validatorului poate lipsi (ex. D205 pe unele build-uri) — verificăm înainte, fiindcă
-    // `run_duk` ar întoarce o eroare „validator neinstalat" în loc de un verdict. Folosim aceeași
-    // rezolvare ca `BundledProvider` (Tauri păstrează prefixul `resources/` în pachet).
-    let jar = {
-        use tauri::Manager;
-        let root =
-            crate::anaf_decl::duk::bundled_res_root(&app.path().resource_dir().unwrap_or_default());
-        root.join(format!("duk/lib/{}Validator.jar", kind.as_duk_type()))
-    };
-    if !jar.is_file() {
-        return Ok(XmlDukValidation {
-            available: false,
-            passed: false,
-            issues: Vec::new(),
-        });
-    }
-    let tmp = std::env::temp_dir().join(format!("duk_revalidate_{}.xml", uuid::Uuid::now_v7()));
-    std::fs::write(&tmp, xml.as_bytes())
-        .map_err(|e| AppError::Other(format!("Nu s-a putut scrie temp XML: {e}")))?;
-    let provider = crate::anaf_decl::duk::BundledProvider::new(&app);
-    let outcome = crate::anaf_decl::duk::run_duk(&provider, kind, &tmp);
-    let _ = std::fs::remove_file(&tmp);
-    Ok(match outcome? {
-        Some(o) => XmlDukValidation {
-            available: true,
-            passed: o.passed,
-            issues: o.errors,
-        },
-        None => XmlDukValidation {
-            available: false,
-            passed: false,
-            issues: Vec::new(),
-        },
+    // Jar-ul validatorului poate lipsi (ex. D205 pe unele build-uri) — `require_jar=true` verifică
+    // înainte, fiindcă `run_duk` ar întoarce o eroare „validator neinstalat" în loc de un verdict.
+    let gate = crate::anaf_decl::duk::gate_xml_with_duk(&app, kind, &xml, true)?;
+    Ok(XmlDukValidation {
+        available: gate.available,
+        passed: gate.passed,
+        issues: gate.issues,
     })
 }
 
@@ -2124,16 +2098,8 @@ pub async fn export_d300_official(
     let xml = generate_d300_xml(&rows, &ver)?;
 
     // Layer D: validate with the bundled DUK before writing. Graceful: no runtime → proceed.
-    let tmp =
-        std::env::temp_dir().join(format!("d300_official_check_{}.xml", uuid::Uuid::now_v7()));
-    std::fs::write(&tmp, xml.as_bytes()).map_err(|e| AppError::Other(e.to_string()))?;
-    let provider = crate::anaf_decl::duk::BundledProvider::new(&app);
-    let duk = crate::anaf_decl::duk::run_duk(&provider, DeclKind::D300, &tmp)?;
-    let _ = std::fs::remove_file(&tmp);
-    let (duk_available, duk_passed, mut issues) = match &duk {
-        Some(o) => (true, o.passed, o.errors.clone()),
-        None => (false, false, Vec::new()),
-    };
+    let gate = crate::anaf_decl::duk::gate_xml_with_duk(&app, DeclKind::D300, &xml, false)?;
+    let (duk_available, duk_passed, mut issues) = (gate.available, gate.passed, gate.issues);
     if let Some(w) = recv_warning {
         issues.push(w);
     }

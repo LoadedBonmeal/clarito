@@ -52,28 +52,10 @@ pub async fn export_d101_xml(
     let dest = crate::commands::integrations::validate_export_path(&params.dest_path)?;
     let xml = build_d101_xml(&params.header)?;
 
-    // Layer D: validare cu DUK (D101Validator.jar) înainte de scriere — grațios dacă lipsește.
-    let tmp =
-        std::env::temp_dir().join(format!("d101_official_check_{}.xml", uuid::Uuid::now_v7()));
-    std::fs::write(&tmp, xml.as_bytes())
-        .map_err(|e| AppError::Other(format!("Nu s-a putut scrie temp D101: {e}")))?;
-    let provider = crate::anaf_decl::duk::BundledProvider::new(&app);
-    let d101_jar = {
-        use tauri::Manager;
-        let root =
-            crate::anaf_decl::duk::bundled_res_root(&app.path().resource_dir().unwrap_or_default());
-        root.join("duk/lib/D101Validator.jar")
-    };
-    let duk = if d101_jar.is_file() {
-        crate::anaf_decl::duk::run_duk(&provider, DeclKind::D101, &tmp)?
-    } else {
-        None
-    };
-    let _ = std::fs::remove_file(&tmp);
-    let (duk_available, duk_passed, issues) = match &duk {
-        Some(o) => (true, o.passed, o.errors.clone()),
-        None => (false, false, Vec::new()),
-    };
+    // Layer D: validare cu DUK (D101Validator.jar) înainte de scriere — grațios dacă lipsește
+    // (require_jar: jar-ul per-declarație poate lipsi din build).
+    let gate = crate::anaf_decl::duk::gate_xml_with_duk(&app, DeclKind::D101, &xml, true)?;
+    let (duk_available, duk_passed, issues) = (gate.available, gate.passed, gate.issues);
     if !duk_gate_allows_write(duk_available, duk_passed, params.skip_duk_override) {
         return Ok(OfficialExportResult {
             path: String::new(),

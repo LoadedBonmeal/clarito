@@ -55,6 +55,7 @@ use std::str::FromStr;
 
 use crate::anaf_decl::d112::{pct, CAM_PCT};
 use crate::db::gl::{post_manual_journal, ManualJournal};
+use crate::db::invoices::round2;
 use crate::db::models::{new_id, now_unix};
 use crate::db::payroll_config::get_payroll_config;
 use crate::error::AppResult;
@@ -63,10 +64,6 @@ use crate::error::AppResult;
 const CAS_PCT: (i64, u32) = (25, 2);
 const CASS_PCT: (i64, u32) = (10, 2);
 const IMPOZIT_PCT: (i64, u32) = (10, 2);
-
-fn round2(x: Decimal) -> Decimal {
-    x.round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
-}
 
 fn dp(s: &str) -> Decimal {
     Decimal::from_str(s).unwrap_or_default()

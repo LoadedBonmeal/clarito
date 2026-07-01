@@ -23,6 +23,7 @@ use sqlx::{FromRow, SqlitePool};
 use std::str::FromStr;
 
 use crate::db::gl::{post_manual_journal, ManualJournal};
+use crate::db::invoices::round2;
 use crate::db::models::{new_id, now_unix};
 use crate::db::products::resolve_accounts;
 use crate::db::stock_valuation::{record_movement, Dir, StockMovementInput};
@@ -107,10 +108,6 @@ pub struct NirInput {
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-fn round2(d: Decimal) -> Decimal {
-    d.round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
-}
 
 fn parse_dec(s: &str, label: &str) -> AppResult<Decimal> {
     Decimal::from_str(s.trim())

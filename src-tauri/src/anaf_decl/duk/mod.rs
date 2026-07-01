@@ -125,6 +125,77 @@ pub fn run_duk(
     Ok(Some(parse_duk_output(&raw)))
 }
 
+/// Rezultatul gate-ului DUK pre-scriere — exact triple-ul (`duk_available`, `duk_passed`,
+/// `issues`) pe care comenzile de export îl dau la `duk_gate_allows_write` și îl întorc în
+/// `OfficialExportResult`.
+#[derive(Debug)]
+pub struct DukGateOutcome {
+    pub available: bool,
+    pub passed: bool,
+    pub issues: Vec<PreflightIssue>,
+}
+
+impl DukGateOutcome {
+    fn skipped() -> Self {
+        Self {
+            available: false,
+            passed: false,
+            issues: Vec::new(),
+        }
+    }
+}
+
+/// Layer D comun: validează `xml` cu DUK-ul bundlat înainte ca un export să scrie pe disc.
+/// Scrie XML-ul într-un fișier temporar unic, rulează [`run_duk`], șterge temporarul și
+/// întoarce verdictul.
+///
+/// Semantica grațioasă a call-site-urilor este PĂSTRATĂ: fără runtime Java/DUK bundlat →
+/// `available=false, passed=false, issues=[]`, iar caller-ul decide prin
+/// `duk_gate_allows_write` (implicit exportul continuă — nu blocăm build-urile fără DUK).
+///
+/// `require_jar=true` verifică suplimentar existența `duk/lib/{TIP}Validator.jar` înainte de
+/// rulare — jar-ul per-declarație poate lipsi din unele build-uri (ex. D205), caz în care
+/// `run_duk` ar întoarce o eroare „validator neinstalat" în loc de un verdict; lipsa jar-ului
+/// ⇒ același skip grațios (`available=false`). Site-urile D300/D394/D406/D112 (validatoare
+/// întotdeauna bundlate) folosesc `require_jar=false`, păstrând comportamentul lor istoric.
+pub fn gate_xml_with_duk(
+    app: &tauri::AppHandle,
+    kind: DeclKind,
+    xml: &str,
+    require_jar: bool,
+) -> AppResult<DukGateOutcome> {
+    if require_jar {
+        use tauri::Manager;
+        let jar = bundled_res_root(&app.path().resource_dir().unwrap_or_default())
+            .join(format!("duk/lib/{}Validator.jar", kind.as_duk_type()));
+        if !jar.is_file() {
+            return Ok(DukGateOutcome::skipped());
+        }
+    }
+    let tmp = std::env::temp_dir().join(format!(
+        "{}_official_check_{}.xml",
+        kind.as_duk_type().to_lowercase(),
+        uuid::Uuid::now_v7()
+    ));
+    std::fs::write(&tmp, xml.as_bytes()).map_err(|e| {
+        crate::error::AppError::Other(format!(
+            "Nu s-a putut scrie temp {}: {e}",
+            kind.as_duk_type()
+        ))
+    })?;
+    let provider = BundledProvider::new(app);
+    let outcome = run_duk(&provider, kind, &tmp);
+    let _ = std::fs::remove_file(&tmp);
+    Ok(match outcome? {
+        Some(o) => DukGateOutcome {
+            available: true,
+            passed: o.passed,
+            issues: o.errors,
+        },
+        None => DukGateOutcome::skipped(),
+    })
+}
+
 /// Parse DUKIntegrator's textual output (result file or stdout) into issues.
 /// Clean marker: output contains "fara erori"/"fără erori". CRITICAL: ANAF
 /// distinguishes ERORI (blocking) from ATENȚIONĂRI (advisory warnings) — D112

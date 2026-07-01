@@ -2,8 +2,9 @@
  * PeriodLocksPanel — afișează perioadele fiscale blocate ale firmei active
  * și permite deblocarea manuală (cu confirmare).
  *
- * Utilizare: inclus în tab-ul "Închideri" din GlLedger sau în orice pagină cu
- * acces la api.gl.listPeriodLocks / unlockPeriod.
+ * Utilizare: randat în Setări (cardul „Perioade fiscale blocate"), care îi dă
+ * titlul — componenta redă doar lista + acțiunea de deblocare. Poate fi inclus
+ * în orice pagină cu acces la api.gl.listPeriodLocks / unlockPeriod.
  */
 
 import { useCallback, useEffect, useState } from "react";
@@ -80,20 +81,7 @@ export function PeriodLocksPanel({ companyId }: Props) {
   if (!companyId) return null;
 
   return (
-    <div style={{ marginTop: 16 }}>
-      <div
-        style={{
-          fontSize: 11.5,
-          fontWeight: 700,
-          textTransform: "uppercase",
-          letterSpacing: "0.06em",
-          color: "var(--text-2)",
-          marginBottom: 8,
-        }}
-      >
-        Perioade blocate
-      </div>
-
+    <div>
       {loading && (
         <div style={{ color: "var(--text-2)", fontSize: 13 }}>Se încarcă…</div>
       )}

@@ -118,6 +118,10 @@
       "inForce": "in force",
       "note": "Invoices and credit notes for earlier periods automatically use the rates in force at the chargeable-event date."
     },
+    "periodLocks": {
+      "title": "Locked fiscal periods",
+      "desc": "Periods locked automatically when declarations are exported, or manually by the accountant. Unlock a period only when filing a rectifying declaration — unlocking allows GL entries to be regenerated and documents in the period to be modified."
+    },
     "backup": {
       "title": "Backup & restore",
       "archiveSize": "archive: {{size}}",

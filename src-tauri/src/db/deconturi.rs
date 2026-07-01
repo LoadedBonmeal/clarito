@@ -26,6 +26,7 @@ use sqlx::{FromRow, SqlitePool};
 use std::str::FromStr;
 
 use crate::db::gl::{post_manual_journal, ManualJournal};
+use crate::db::invoices::round2;
 use crate::db::models::{new_id, now_unix};
 use crate::db::payroll::{days_in_month, working_days};
 use crate::db::payroll_diurna::upsert_extra_income;
@@ -59,10 +60,6 @@ const DIURNA_LIMIT_B_SALARY_FACTOR: i64 = 3;
 
 fn dp(s: &str) -> Decimal {
     Decimal::from_str(s).unwrap_or_default()
-}
-
-fn round2(x: Decimal) -> Decimal {
-    x.round_dp_with_strategy(2, rust_decimal::RoundingStrategy::MidpointAwayFromZero)
 }
 
 /// Format a Decimal to exactly 2 decimal places (e.g. "200" → "200.00").

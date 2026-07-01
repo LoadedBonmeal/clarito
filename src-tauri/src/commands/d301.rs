@@ -79,28 +79,10 @@ pub async fn export_d301_xml(
     let header = make_header(&company, cif, params.luna, params.an, params.d_rec);
     let xml = build_d301_xml(&header, &params.data)?;
 
-    // Layer D: validare cu DUK (D301Validator.jar) înainte de scriere — grațios dacă lipsește.
-    let tmp =
-        std::env::temp_dir().join(format!("d301_official_check_{}.xml", uuid::Uuid::now_v7()));
-    std::fs::write(&tmp, xml.as_bytes())
-        .map_err(|e| AppError::Other(format!("Nu s-a putut scrie temp D301: {e}")))?;
-    let provider = crate::anaf_decl::duk::BundledProvider::new(&app);
-    let d301_jar = {
-        use tauri::Manager;
-        let root =
-            crate::anaf_decl::duk::bundled_res_root(&app.path().resource_dir().unwrap_or_default());
-        root.join("duk/lib/D301Validator.jar")
-    };
-    let duk = if d301_jar.is_file() {
-        crate::anaf_decl::duk::run_duk(&provider, DeclKind::D301, &tmp)?
-    } else {
-        None
-    };
-    let _ = std::fs::remove_file(&tmp);
-    let (duk_available, duk_passed, issues) = match &duk {
-        Some(o) => (true, o.passed, o.errors.clone()),
-        None => (false, false, Vec::new()),
-    };
+    // Layer D: validare cu DUK (D301Validator.jar) înainte de scriere — grațios dacă lipsește
+    // (require_jar: jar-ul per-declarație poate lipsi din build).
+    let gate = crate::anaf_decl::duk::gate_xml_with_duk(&app, DeclKind::D301, &xml, true)?;
+    let (duk_available, duk_passed, issues) = (gate.available, gate.passed, gate.issues);
     if !duk_gate_allows_write(duk_available, duk_passed, params.skip_duk_override) {
         return Ok(OfficialExportResult {
             path: String::new(),

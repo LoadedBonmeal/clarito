@@ -51,28 +51,10 @@ pub async fn export_d700_xml(
     let dest = crate::commands::integrations::validate_export_path(&params.dest_path)?;
     let xml = build_d700_xml(&params.input)?;
 
-    // Layer D: validare cu DUK (D700Validator.jar) înainte de scriere — grațios dacă lipsește.
-    let tmp =
-        std::env::temp_dir().join(format!("d700_official_check_{}.xml", uuid::Uuid::now_v7()));
-    std::fs::write(&tmp, xml.as_bytes())
-        .map_err(|e| AppError::Other(format!("Nu s-a putut scrie temp D700: {e}")))?;
-    let provider = crate::anaf_decl::duk::BundledProvider::new(&app);
-    let d700_jar = {
-        use tauri::Manager;
-        let root =
-            crate::anaf_decl::duk::bundled_res_root(&app.path().resource_dir().unwrap_or_default());
-        root.join("duk/lib/D700Validator.jar")
-    };
-    let duk = if d700_jar.is_file() {
-        crate::anaf_decl::duk::run_duk(&provider, DeclKind::D700, &tmp)?
-    } else {
-        None
-    };
-    let _ = std::fs::remove_file(&tmp);
-    let (duk_available, duk_passed, issues) = match &duk {
-        Some(o) => (true, o.passed, o.errors.clone()),
-        None => (false, false, Vec::new()),
-    };
+    // Layer D: validare cu DUK (D700Validator.jar) înainte de scriere — grațios dacă lipsește
+    // (require_jar: jar-ul per-declarație poate lipsi din build).
+    let gate = crate::anaf_decl::duk::gate_xml_with_duk(&app, DeclKind::D700, &xml, true)?;
+    let (duk_available, duk_passed, issues) = (gate.available, gate.passed, gate.issues);
     if !duk_gate_allows_write(duk_available, duk_passed, params.skip_duk_override) {
         return Ok(OfficialExportResult {
             path: String::new(),

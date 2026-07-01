@@ -4,12 +4,13 @@
 //! postează nota contabilă **117 / 457 / 446** (idempotent) și expune obligația pentru Declarația 100,
 //! scadentă pe 25 a lunii următoare PLĂȚII (ori 25 ianuarie pentru dividende distribuite, neplătite).
 
-use rust_decimal::{Decimal, RoundingStrategy};
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use sqlx::{Row, SqlitePool};
 use std::collections::BTreeMap;
 use std::str::FromStr;
 
+use crate::db::invoices::round2;
 use crate::db::models::{new_id, now_unix};
 use crate::error::{AppError, AppResult};
 
@@ -67,10 +68,6 @@ pub fn dividend_tax_deadline(distribution_date: &str, payment_date: Option<&str>
         }
     }
     unpaid_by_year_end_deadline
-}
-
-fn round2(d: Decimal) -> Decimal {
-    d.round_dp_with_strategy(2, RoundingStrategy::MidpointAwayFromZero)
 }
 
 #[derive(Debug, Clone, Serialize)]
