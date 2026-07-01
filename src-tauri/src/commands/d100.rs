@@ -1,6 +1,13 @@
 //! Tauri commands — D100 declarație privind obligațiile de plată la bugetul de stat (OPANAF 57/2026).
 //! DUK gate: lib/D100Validator.jar via `java -jar DUKIntegrator.jar -v D100 <xml> <result>`.
 //! RBAC: preview_d100_xml (citire), export_d100_xml (scriere).
+//!
+//! KNOWN LIMITATION (final v0.7.3 audit; deferred, UI wiring): these XML exporters (and the
+//! D101 siblings) are fully implemented, DUK-gated and RBAC'd, but NO frontend code invokes
+//! them yet — the Declarații hub's D100/D101 cards route to the calc-only Rapoarte views.
+//! Wiring = tauri.ts bindings + an "Export XML oficial" button on the D100/D101 report pages
+//! (mirror the D300 card's export flow); verify the emitted cod_oblig values against the
+//! current OPANAF nomenclature when wiring.
 
 use tauri::State;
 

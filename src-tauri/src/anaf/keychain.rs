@@ -277,7 +277,11 @@ impl TokenBundle {
     /// motivul (limita de 2560 bytes a Windows Credential Manager).
     pub fn save(&self, company_id: &str) -> Result<(), String> {
         save_chunked("efactura", &format!("{company_id}::at"), &self.access_token)?;
-        save_chunked("efactura", &format!("{company_id}::rt"), &self.refresh_token)?;
+        save_chunked(
+            "efactura",
+            &format!("{company_id}::rt"),
+            &self.refresh_token,
+        )?;
 
         let meta = TokenMeta {
             expires_at: self.expires_at,
@@ -305,10 +309,8 @@ impl TokenBundle {
         // Format nou: metadata mică + token-uri chunked separat.
         if let Ok(meta) = serde_json::from_str::<TokenMeta>(&json) {
             if meta.chunked {
-                let access_token =
-                    load_chunked("efactura", &format!("{company_id}::at"))?;
-                let refresh_token =
-                    load_chunked("efactura", &format!("{company_id}::rt"))?;
+                let access_token = load_chunked("efactura", &format!("{company_id}::at"))?;
+                let refresh_token = load_chunked("efactura", &format!("{company_id}::rt"))?;
                 return Some(TokenBundle {
                     access_token,
                     refresh_token,
@@ -429,7 +431,10 @@ mod tests {
         delete_chunked(service, &base); // curățare best-effort, indiferent de rezultat
 
         if let Some(v) = loaded {
-            assert_eq!(v, value, "load_chunked trebuie să reasambleze exact valoarea salvată");
+            assert_eq!(
+                v, value,
+                "load_chunked trebuie să reasambleze exact valoarea salvată"
+            );
         }
     }
 

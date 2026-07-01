@@ -385,9 +385,16 @@ mod tests {
         let p = create(&pool, input("500", "2026-03-20")).await.unwrap();
 
         // Lock the payment's month (a declaration was filed for 2026-03).
-        crate::db::period_locks::lock_period(&pool, "co", "2026-03", "declaration:D300", None, None)
-            .await
-            .unwrap();
+        crate::db::period_locks::lock_period(
+            &pool,
+            "co",
+            "2026-03",
+            "declaration:D300",
+            None,
+            None,
+        )
+        .await
+        .unwrap();
 
         let r = delete(&pool, &p.id, "co").await;
         assert!(

@@ -748,7 +748,8 @@ pub async fn write_payments(
             .try_get("inv_currency")
             .unwrap_or_else(|_| "RON".to_string());
         let inv_fx = parse_rate(row.try_get::<Option<f64>, _>("inv_rate").unwrap_or(None));
-        let pay_fx = parse_rate(row.try_get::<Option<f64>, _>("pay_rate").unwrap_or(None)).or(inv_fx);
+        let pay_fx =
+            parse_rate(row.try_get::<Option<f64>, _>("pay_rate").unwrap_or(None)).or(inv_fx);
         amount_to_ron(amount, &currency, pay_fx)
     };
 

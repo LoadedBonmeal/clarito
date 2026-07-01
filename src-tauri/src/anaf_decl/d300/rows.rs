@@ -943,8 +943,7 @@ pub fn map_to_rows(
     // (R3_1/R3_1_1 are always None/0 today but are included for completeness).
     let total_plata_a: i64 = [
         r1_1_v, r3_1_v, r3_1_1_v, r14_1_v, r15_1_v, r5_1_v, r5_2_v, r7_1_v, r7_2_v, r7_1_1_v,
-        r7_1_2_v,
-        r9_1_v, r9_2_v, r10_1_v, r10_2_v, r11_1_v, r11_2_v, r12_1_v, r12_2_v, r12_1_1_v,
+        r7_1_2_v, r9_1_v, r9_2_v, r10_1_v, r10_2_v, r11_1_v, r11_2_v, r12_1_v, r12_2_v, r12_1_1_v,
         r12_1_2_v, r12_2_1_v, r12_2_2_v, r13_1_v, r16_1_v, r16_2_v, r18_1_v, r18_2_v, r17_1_v,
         r17_2_v, r20_1_v, r20_2_v, r20_1_1_v, r20_1_2_v, r22_1_v, r22_2_v, r23_1_v, r23_2_v,
         r25_1_v, r25_2_v, r25_1_1_v, r25_1_2_v, r25_2_1_v, r25_2_2_v, r27_1_v, r27_2_v, r28_2_v,
@@ -1453,8 +1452,15 @@ mod tests {
 
         let rows = map_to_rows(&report, &sub, &company, period, 0).expect("map_to_rows");
 
-        assert_eq!(rows.r1_1, Some(3000), "R1_1 = 3000 (K sales, intra-EU goods)");
-        assert_eq!(rows.r3_1, None, "R3_1 = None (unpopulated pending K-services flag)");
+        assert_eq!(
+            rows.r1_1,
+            Some(3000),
+            "R1_1 = 3000 (K sales, intra-EU goods)"
+        );
+        assert_eq!(
+            rows.r3_1, None,
+            "R3_1 = None (unpopulated pending K-services flag)"
+        );
         assert_eq!(rows.r14_1, None, "R14_1 = None (no G/Z lines)");
         assert_eq!(rows.r15_1, None, "R15_1 = None (no E lines)");
     }
@@ -1499,7 +1505,10 @@ mod tests {
         let rows = map_to_rows(&report, &sub, &company, period, 0).expect("map_to_rows");
 
         assert_eq!(rows.r14_1, Some(700), "R14_1 = 700 (Z zero-rated)");
-        assert_eq!(rows.r1_1, None, "R1_1 = None (Z must no longer land on rd.1)");
+        assert_eq!(
+            rows.r1_1, None,
+            "R1_1 = None (Z must no longer land on rd.1)"
+        );
         assert_eq!(rows.r17_1, Some(700), "R17_1 includes R14_1");
     }
 
@@ -1515,9 +1524,16 @@ mod tests {
 
         let rows = map_to_rows(&report, &sub, &company, period, 0).expect("map_to_rows");
 
-        assert_eq!(rows.r15_1, Some(1200), "R15_1 = 1200 (E exempt no-deduction)");
+        assert_eq!(
+            rows.r15_1,
+            Some(1200),
+            "R15_1 = 1200 (E exempt no-deduction)"
+        );
         assert_eq!(rows.r1_1, None, "R1_1 = None (E must not land on rd.1)");
-        assert_eq!(rows.r14_1, None, "R14_1 = None (E is fără drept → rd.15, not rd.14)");
+        assert_eq!(
+            rows.r14_1, None,
+            "R14_1 = None (E is fără drept → rd.15, not rd.14)"
+        );
         assert_eq!(
             rows.r17_1,
             Some(1200),
@@ -1547,13 +1563,19 @@ mod tests {
         assert_eq!(rows.r1_1, Some(2000), "R1_1 = K(2000)");
         assert_eq!(rows.r14_1, Some(4000), "R14_1 = Z(1000) + G(3000)");
         assert_eq!(rows.r15_1, Some(4000), "R15_1 = E(4000)");
-        assert_eq!(rows.r3_1, None, "R3_1 = None (unpopulated pending K-services flag)");
+        assert_eq!(
+            rows.r3_1, None,
+            "R3_1 = None (unpopulated pending K-services flag)"
+        );
         assert_eq!(
             rows.r17_1,
             Some(10000),
             "R17_1 = R1_1 + R14_1 + R15_1 = 2000+4000+4000 (nothing silently dropped)"
         );
-        assert_eq!(rows.r17_2, None, "R17_2 = None (all base-only rows, no VAT)");
+        assert_eq!(
+            rows.r17_2, None,
+            "R17_2 = None (all base-only rows, no VAT)"
+        );
     }
 
     #[test]

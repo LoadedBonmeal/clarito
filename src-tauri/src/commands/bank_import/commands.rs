@@ -353,7 +353,9 @@ pub async fn list_bank_transactions(
         let reference: Option<String> = row.try_get("reference").ok().flatten();
         let counterparty_cui: Option<String> = row.try_get("counterparty_cui").ok().flatten();
         let amount = Decimal::from_str(amount_str.trim()).unwrap_or(Decimal::ZERO);
-        let txn_currency: String = row.try_get("currency").unwrap_or_else(|_| "RON".to_string());
+        let txn_currency: String = row
+            .try_get("currency")
+            .unwrap_or_else(|_| "RON".to_string());
 
         // Build suggestions only for UNMATCHED transactions
         let suggestions = if status == "UNMATCHED" {

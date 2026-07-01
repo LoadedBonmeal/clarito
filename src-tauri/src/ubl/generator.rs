@@ -1420,7 +1420,10 @@ mod tests {
             "București"
         );
         // Not Bucharest — city untouched.
-        assert_eq!(bucharest_city_name("Cluj", "Cluj-Napoca", "RO-CJ"), "Cluj-Napoca");
+        assert_eq!(
+            bucharest_city_name("Cluj", "Cluj-Napoca", "RO-CJ"),
+            "Cluj-Napoca"
+        );
     }
 
     #[test]
@@ -1516,7 +1519,9 @@ mod tests {
         );
 
         // Element order: cac:Delivery after AccountingCustomerParty, before PaymentMeans.
-        let acp_end = body.find("</cac:AccountingCustomerParty>").expect("acp end");
+        let acp_end = body
+            .find("</cac:AccountingCustomerParty>")
+            .expect("acp end");
         let delivery_start = body.find("<cac:Delivery>").expect("delivery start");
         let payment_start = body.find("<cac:PaymentMeans>").expect("payment start");
         assert!(

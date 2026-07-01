@@ -8749,7 +8749,16 @@ mod tests {
         .await;
         // A small real January sale so the period isn't degenerate (net collected != 0 either way).
         insert_invoice_on(
-            &pool, "co", "inv-small", "ct", "VALIDATED", "500", "100", "600", None, "2025-01-20",
+            &pool,
+            "co",
+            "inv-small",
+            "ct",
+            "VALIDATED",
+            "500",
+            "100",
+            "600",
+            None,
+            "2025-01-20",
         )
         .await;
 
@@ -8775,11 +8784,12 @@ mod tests {
         // ── The actual FIX 5 assertion: no negative debit/credit anywhere in the posted journal ──
         // source_id for post_vat_settlement is "{period_from}_{period_to}" (see the function body).
         let jpk = get_journal_pk(&pool, "2025-01-01_2025-01-31").await;
-        let rows = sqlx::query("SELECT account_code, debit, credit FROM gl_entry WHERE journal_pk=?1")
-            .bind(&jpk)
-            .fetch_all(&pool)
-            .await
-            .unwrap();
+        let rows =
+            sqlx::query("SELECT account_code, debit, credit FROM gl_entry WHERE journal_pk=?1")
+                .bind(&jpk)
+                .fetch_all(&pool)
+                .await
+                .unwrap();
         assert!(!rows.is_empty(), "VAT_CLOSE journal must have entries");
         let mut total_debit = Decimal::ZERO;
         let mut total_credit = Decimal::ZERO;
@@ -10956,9 +10966,16 @@ mod tests {
         )
         .await;
         // Lock ONLY the posting month (January of year+1) — the closed year stays unlocked.
-        crate::db::period_locks::lock_period(&pool, "co_pm", "2027-01", "declaration:D101", None, None)
-            .await
-            .unwrap();
+        crate::db::period_locks::lock_period(
+            &pool,
+            "co_pm",
+            "2027-01",
+            "declaration:D101",
+            None,
+            None,
+        )
+        .await
+        .unwrap();
         let r = post_annual_close(&pool, "co_pm", 2026).await;
         assert!(
             matches!(r, Err(crate::error::AppError::Validation(_))),
@@ -11010,14 +11027,20 @@ mod tests {
         .fetch_one(&pool)
         .await
         .unwrap();
-        assert_eq!(n, 1, "re-run must replace, not duplicate, the close journal");
+        assert_eq!(
+            n, 1,
+            "re-run must replace, not duplicate, the close journal"
+        );
 
         // 117 carries the profit exactly once...
         let tb2 = trial_balance(&pool, "co_rr", "2026-01-01", "2027-12-31")
             .await
             .unwrap();
         let c117 = tb2.rows.iter().find(|x| x.account_code == "117").unwrap();
-        assert_eq!(c117.closing_credit, "3900.00", "117 must hold the profit ONCE");
+        assert_eq!(
+            c117.closing_credit, "3900.00",
+            "117 must hold the profit ONCE"
+        );
         // ...and the whole trial balance is unchanged vs. the first run.
         for r1 in &tb1.rows {
             let r2 = tb2

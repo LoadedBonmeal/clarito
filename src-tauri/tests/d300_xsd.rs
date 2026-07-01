@@ -1050,7 +1050,11 @@ fn d300_wave3_audit_fix1_zkge_sales_routing() {
         Some(11000),
         "Wave3 FIX1: R17_1 = R1_1+R14_1+R15_1+R9_1 = 2000+4000+4000+1000 (nothing dropped)"
     );
-    assert_eq!(rows.r17_2, Some(210), "Wave3 FIX1: R17_2 = 210 (only S has VAT)");
+    assert_eq!(
+        rows.r17_2,
+        Some(210),
+        "Wave3 FIX1: R17_2 = 210 (only S has VAT)"
+    );
 
     let xml = generate_d300_xml(&rows, &ver).expect("generate");
     eprintln!("Wave3 FIX1 ZKGE XML:\n{xml}");

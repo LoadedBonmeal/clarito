@@ -69,7 +69,11 @@ pub async fn suggest_matches(
     let threshold = Decimal::new(1, 2); // 0.01 amount match tolerance
     let txn_cur = {
         let t = txn_currency.trim();
-        if t.is_empty() { "RON" } else { t }
+        if t.is_empty() {
+            "RON"
+        } else {
+            t
+        }
     }
     .to_uppercase();
 
@@ -414,8 +418,8 @@ mod tests {
             Some("Plata factura F2026-004"),
             None,
         )
-            .await
-            .unwrap();
+        .await
+        .unwrap();
 
         assert!(sugg.len() >= 2);
         // HIGH confidence suggestion must come first

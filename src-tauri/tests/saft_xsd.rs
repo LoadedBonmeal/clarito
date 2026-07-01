@@ -612,7 +612,9 @@ async fn saft_d406_payments_fx_matches_gl_for_foreign_currency_invoice() {
         .expect("payment REF-EUR-1 must be present in Payments section");
     // The PaymentLineAmount/Amount follows PaymentRefNo within the same <Payment> block.
     let after_ref = &payments_section[ref_pos..];
-    let amount_tag_start = after_ref.find("<Amount>").expect("Amount tag present after ref");
+    let amount_tag_start = after_ref
+        .find("<Amount>")
+        .expect("Amount tag present after ref");
     let amount_value_start = amount_tag_start + "<Amount>".len();
     let amount_tag_end = after_ref[amount_value_start..]
         .find("</Amount>")

@@ -763,7 +763,10 @@ mod tests {
     fn deadline_unpaid_by_year_end_always_25_jan_next_year() {
         assert_eq!(dividend_tax_deadline("2025-01-01", None), "2026-01-25");
         assert_eq!(dividend_tax_deadline("2025-01-01", Some("")), "2026-01-25");
-        assert_eq!(dividend_tax_deadline("2025-01-01", Some("   ")), "2026-01-25");
+        assert_eq!(
+            dividend_tax_deadline("2025-01-01", Some("   ")),
+            "2026-01-25"
+        );
         // An diferit — plafonul urmează anul distribuirii, nu anul curent.
         assert_eq!(dividend_tax_deadline("2027-06-01", None), "2028-01-25");
     }

@@ -200,8 +200,7 @@ pub async fn export_saft_official(
         // Periodic L-profile: auto-post GL entries (idempotent) before generating so
         // GeneralLedgerEntries is populated with current data — LOCKED months keep their
         // stored (authoritative) entries instead of hard-failing the export.
-        regenerate_gl_unlocked_months(&state.db, &params.company_id, &date_from, &date_to)
-            .await?;
+        regenerate_gl_unlocked_months(&state.db, &params.company_id, &date_from, &date_to).await?;
         generate_saft_xml(&state.db, &company, &date_from, &date_to).await?
     };
 
@@ -294,8 +293,7 @@ pub async fn preview_saft_official_xml(
     } else {
         // Same locked-period handling as export_saft_official: stored GL is authoritative
         // for a locked (filed) month — regenerate only the unlocked months.
-        regenerate_gl_unlocked_months(&state.db, &params.company_id, &date_from, &date_to)
-            .await?;
+        regenerate_gl_unlocked_months(&state.db, &params.company_id, &date_from, &date_to).await?;
         generate_saft_xml(&state.db, &company, &date_from, &date_to).await?
     };
 
