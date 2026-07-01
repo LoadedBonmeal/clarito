@@ -12,6 +12,7 @@ use std::str::FromStr;
 
 use crate::db::companies::Company;
 use crate::db::contacts::Contact;
+use crate::anaf_decl::saft::masterfiles::uom_to_rec20;
 use crate::db::invoices::{Invoice, LineItem};
 use crate::error::{AppError, AppResult};
 use crate::ubl::fx;
@@ -513,8 +514,13 @@ fn write_invoice_line(
     write_text(writer, "cbc:ID", &line.position.to_string())?;
 
     // <cbc:InvoicedQuantity unitCode="...">
+    // CIUS-RO / EN16931 BR-CL-23: unitCode MUST be a UN/ECE Rec 20 code (piece = "H87"), which ANAF
+    // enforces — a raw Romanian abbreviation like "buc" is rejected. Normalize the human unit to its
+    // Rec 20 code at emit time via the shared mapper (the friendly unit stays in the DB/UI; only the
+    // XML is coded). uom_to_rec20 never fails (unknown → H87), so the emitted code is always valid.
+    let unit_code = uom_to_rec20(&line.unit);
     let mut qty_elem = BytesStart::new("cbc:InvoicedQuantity");
-    qty_elem.push_attribute(("unitCode", line.unit.as_str()));
+    qty_elem.push_attribute(("unitCode", unit_code));
     writer
         .write_event(Event::Start(qty_elem))
         .map_err(|e| AppError::Xml(e.to_string()))?;
@@ -910,6 +916,33 @@ mod tests {
             seller,
             buyer,
             storno_ref: None,
+        }
+    }
+
+    #[test]
+    fn unit_code_normalized_to_rec20_br_cl_23() {
+        // EN16931/CIUS-RO BR-CL-23: unitCode MUST be a UN/ECE Rec 20 code. A human abbreviation like
+        // "buc" emitted raw is rejected by ANAF. The generator must map "buc" → "H87" (the friendly
+        // unit stays in the DB/UI; only the XML is coded). Regression guard for the publication blocker.
+        let mut input = sample_input();
+        input.lines[0].unit = "buc".to_string();
+        let xml = generate_ubl(&input).expect("should generate XML");
+        assert!(
+            xml.contains(r#"unitCode="H87""#),
+            "line unit \"buc\" must be emitted as Rec 20 code H87"
+        );
+        assert!(
+            !xml.contains(r#"unitCode="buc""#),
+            "raw \"buc\" must NOT appear as a unitCode (BR-CL-23 → ANAF rejection)"
+        );
+        for (human, code) in [("ora", "HUR"), ("kg", "KGM"), ("l", "LTR"), ("luna", "MON")] {
+            let mut inp = sample_input();
+            inp.lines[0].unit = human.to_string();
+            let x = generate_ubl(&inp).expect("gen");
+            assert!(
+                x.contains(&format!("unitCode=\"{code}\"")),
+                "unit \"{human}\" must map to Rec 20 code {code}"
+            );
         }
     }
 
