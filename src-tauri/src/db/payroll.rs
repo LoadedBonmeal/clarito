@@ -1070,6 +1070,16 @@ pub async fn compute_payroll_run(
                     year,
                     month,
                 );
+                // KNOWN LIMITATION (found by the pre-publication audit; deferred): for a PART-TIME
+                // employee whose realized gross is below the minimum wage, art. 146 alin. (5^6) lifts the
+                // CAS/CASS base to `baza_cas`/`baza_cass` (the employer covering the difference). When such
+                // an employee ALSO has a diurnă excess, the D112-declared CAS/CASS should be computed on
+                // `baza_cas + excess`, but the combined base below uses `sal_gross + excess` (the realized
+                // gross), so build_d112_xml's Wave E overwrite under-declares CAS/CASS for that narrow
+                // combo. A correct fix must keep TWO CAS values — the D112 total on the lifted base vs. the
+                // employee's CAS on realized income that feeds `comb_impozit_base` (the tax base must NOT
+                // absorb the employer-borne lift) — so it needs dedicated golden fixtures + fiscal review
+                // rather than a hasty change to the payroll core here.
                 let combined_base = sal_gross + emp_excess;
                 let comb_cas = pct(combined_base, (25, 2));
                 let comb_cass = pct(combined_base, (10, 2));

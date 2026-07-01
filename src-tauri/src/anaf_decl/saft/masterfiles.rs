@@ -600,6 +600,19 @@ pub async fn write_suppliers(
         let issuer_name: String = row.try_get("issuer_name").unwrap_or_default();
         // Use CUI as dedup key
         // Canonical ID for received invoice issuers = "00" + RO-stripped CUI digits
+        //
+        // KNOWN LIMITATION (found by the pre-publication audit; deferred): this uses
+        // canonical_partner_id("", cui) with an EMPTY id, whereas the GL posts received-invoice
+        // suppliers with canonical_partner_id(received_invoice_id, cui) (db/gl.rs). For a FOREIGN VAT id
+        // (non-numeric, e.g. "DE811234") the CUI branch is skipped, so here the empty id yields "0" →
+        // this loop `continue`s and emits NO Supplier record, but the GL/SourceDocuments carry the
+        // anonymized id "080000000000000" → a dangling SupplierID with no MasterFiles/Suppliers entry
+        // (a referential-integrity gap the D406 validator may flag). It only bites a foreign-CUI issuer
+        // that is NOT also a saved no-CUI contact (the contacts loop above already emits the
+        // "080000000000000" bucket in that case). Correct fix: emit one anonymized Supplier record for
+        // the "080000000000000" bucket whenever any received-invoice issuer maps to it (with its GL
+        // balance), then re-validate against the official Ro_SAFT XSD + DUK. Deferred to keep this a
+        // tested, XSD-validated change rather than a blind edit.
         let issuer_canon_id = canonical_partner_id("", &issuer_cui);
         if issuer_cui.is_empty()
             || issuer_canon_id == "0"
