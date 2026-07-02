@@ -528,7 +528,7 @@ pub async fn export_declaration_xlsx(
 /// Write a self-contained, print-ready HTML document to the app cache dir and open it in the system
 /// default browser (where `window.print()` works and "Save as PDF" is available). Used by the XML
 /// viewer's "Printează / Salvează PDF": Tauri's WKWebView can't `window.print()`, and the JS opener
-/// only permits dialog-granted paths — opening from Rust (`open`/`start`/`xdg-open`) bypasses that.
+/// only permits dialog-granted paths — opening from Rust (`tauri_plugin_opener`) bypasses that.
 #[tauri::command]
 pub async fn open_doc_in_browser(
     app: tauri::AppHandle,
@@ -558,19 +558,11 @@ pub async fn open_doc_in_browser(
     let path = dir.join(name);
     std::fs::write(&path, html.as_bytes())?;
 
-    #[cfg(target_os = "macos")]
-    crate::process_util::hidden_command("open")
-        .arg(&path)
-        .spawn()?;
-    #[cfg(target_os = "windows")]
-    crate::process_util::hidden_command("cmd")
-        .args(["/C", "start", ""])
-        .arg(&path)
-        .spawn()?;
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-    crate::process_util::hidden_command("xdg-open")
-        .arg(&path)
-        .spawn()?;
+    // XPLAT: open via the opener plugin (same as anaf/oauth.rs) instead of hand-rolled
+    // `open`/`cmd /C start`/`xdg-open` spawns — `cmd /C start` split arguments on `&`
+    // and other cmd metacharacters in the cache path, silently failing to open the doc.
+    tauri_plugin_opener::open_path(&path, None::<&str>)
+        .map_err(|e| AppError::Other(format!("deschidere document: {e}")))?;
 
     Ok(())
 }

@@ -1,3 +1,32 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# SIGNED release pipeline — PREPARED, but NOT the current publishing path.
+#
+# CURRENT PUBLISHING PATH: MANUAL builds. Installers are built locally and
+# published by hand. This workflow must never break that path: when the signing
+# secrets are absent it SKIPS cleanly (see check-signing-secrets below), so it
+# coexists with manual publishing and with the unsigned release-build.yml.
+#
+# To enable this pipeline, configure ALL of the following repo secrets:
+#   - DUK_JARS_URL — bundled ANAF DUK validator jars + minimal JRE source. Unlike
+#     release-build.yml (which degrades to an UNBUNDLED build), this signed
+#     pipeline FAILS HARD without it: a signed, publishable installer must be
+#     complete (local e-Factura validation included).
+#   - APPLE_CERTIFICATE(_PASSWORD), APPLE_SIGNING_IDENTITY, APPLE_ID,
+#     APPLE_PASSWORD, APPLE_TEAM_ID, KEYCHAIN_PASSWORD — macOS signing + notarization.
+#   - WINDOWS_CERTIFICATE(_PASSWORD) — Authenticode pfx (base64). Tauri v2 does NOT
+#     read the old WINDOWS_CERTIFICATE env vars at build time; the dedicated import
+#     step below extracts the certificate thumbprint and injects it via a
+#     `--config` override, keeping tauri.conf.json machine-independent.
+#   - TAURI_SIGNING_PRIVATE_KEY(_PASSWORD) — updater artifact signatures (dormant
+#     until the updater ships, see TODO below).
+#
+# TODO — in-app updater artifacts (deliberately NOT enabled yet):
+#   - Do NOT set bundle.createUpdaterArtifacts in tauri.conf.json for now.
+#   - The configured updater endpoint (https://releases.lucaris.ro/...) does not
+#     exist yet; the in-app updater stays dormant until it does.
+#   - When enabling: flip createUpdaterArtifacts, then publish latest.json plus
+#     the .sig files to releases.lucaris.ro alongside the installers.
+# ─────────────────────────────────────────────────────────────────────────────
 name: Release
 
 on:
@@ -82,6 +111,42 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
+      # ── DUK validator + minimal JRE (mirrors release-build.yml, but fails hard) ──
+      # JDK for jlink. NOTE: the jlink JRE is single-arch — aarch64 here, matching the
+      # macos-14 (Apple silicon) runner. Inside the universal .app the bundled DUK
+      # validator therefore runs natively on Apple silicon; Intel Macs fall back to
+      # ANAF server-side validation (same behavior as an unbundled build).
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          architecture: aarch64
+
+      # Vendored ANAF DUKIntegrator jars — only available via the secret. A SIGNED
+      # release must be complete, so unlike release-build.yml this FAILS instead of
+      # degrading to an unbundled build.
+      - name: Stage DUK validator jars
+        shell: bash
+        run: |
+          if [ -z "${{ secrets.DUK_JARS_URL }}" ]; then
+            echo "::error::DUK_JARS_URL is not set — the signed release must bundle the DUK validator + JRE. Configure the secret (the unsigned/unbundled fallback lives in release-build.yml)."
+            exit 1
+          fi
+          mkdir -p src-tauri/resources/duk src-tauri/resources/jre-min
+          curl -fsSL "${{ secrets.DUK_JARS_URL }}" -o /tmp/duk.zip
+          unzip -q /tmp/duk.zip -d src-tauri/resources/duk
+          # Self-heal the per-declaration *Validator.jar overlays straight from static.anaf.ro
+          # so the bundle carries the latest validators even if the duk.zip secret predates
+          # them. DUKIntegrator.jar + the JRE stay from the secret.
+          mkdir -p src-tauri/resources/duk/lib
+          DUK_LIB_DIR="$PWD/src-tauri/resources/duk/lib" bash scripts/fetch-validators.sh \
+            || echo "::warning::Validator top-up partially failed — bundle uses the secret's jars as-is."
+
+      - name: Build minimal JRE (jlink)
+        shell: bash
+        run: JAVA_HOME="$JAVA_HOME" bash scripts/jlink-jre.sh
+
       - name: Quality gates
         run: |
           pnpm exec tsc --noEmit
@@ -116,6 +181,10 @@ jobs:
     needs: check-signing-secrets
     if: needs.check-signing-secrets.outputs.signed == 'true'
     runs-on: windows-latest
+    env:
+      # Job-level so the Authenticode step's `if: env.WINDOWS_CERTIFICATE != ''`
+      # guard can see it (secrets are not directly readable in step conditions).
+      WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
     steps:
       - uses: actions/checkout@v4
 
@@ -127,6 +196,38 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
+      # ── DUK validator + minimal JRE (mirrors release-build.yml, but fails hard) ──
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          architecture: x64
+
+      # Vendored ANAF DUKIntegrator jars — only available via the secret. A SIGNED
+      # release must be complete, so unlike release-build.yml this FAILS instead of
+      # degrading to an unbundled build.
+      - name: Stage DUK validator jars
+        shell: bash
+        run: |
+          if [ -z "${{ secrets.DUK_JARS_URL }}" ]; then
+            echo "::error::DUK_JARS_URL is not set — the signed release must bundle the DUK validator + JRE. Configure the secret (the unsigned/unbundled fallback lives in release-build.yml)."
+            exit 1
+          fi
+          mkdir -p src-tauri/resources/duk src-tauri/resources/jre-min
+          curl -fsSL "${{ secrets.DUK_JARS_URL }}" -o /tmp/duk.zip
+          unzip -q /tmp/duk.zip -d src-tauri/resources/duk
+          # Self-heal the per-declaration *Validator.jar overlays straight from static.anaf.ro
+          # so the bundle carries the latest validators even if the duk.zip secret predates
+          # them. DUKIntegrator.jar + the JRE stay from the secret.
+          mkdir -p src-tauri/resources/duk/lib
+          DUK_LIB_DIR="$PWD/src-tauri/resources/duk/lib" bash scripts/fetch-validators.sh \
+            || echo "::warning::Validator top-up partially failed — bundle uses the secret's jars as-is."
+
+      - name: Build minimal JRE (jlink)
+        shell: bash
+        run: JAVA_HOME="$JAVA_HOME" bash scripts/jlink-jre.sh
+
       - name: Quality gates
         run: |
           pnpm exec tsc --noEmit
@@ -136,13 +237,37 @@ jobs:
           cargo clippy --all-targets --all-features -- -D warnings
           cargo test --lib
 
+      # ── Windows Authenticode ─────────────────────────────────────────────────
+      # Tauri v2 does NOT read the v1-era WINDOWS_CERTIFICATE/_PASSWORD env vars at
+      # build time — signing is driven by bundle.windows.certificateThumbprint.
+      # Decode the base64 pfx, import it into the user certificate store, extract
+      # the thumbprint, and hand it to the build step as a `--config` override so
+      # tauri.conf.json stays machine-independent.
+      - name: Import Windows Authenticode certificate (thumbprint → config override)
+        if: env.WINDOWS_CERTIFICATE != ''
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          $b64 = Join-Path $env:RUNNER_TEMP 'authenticode.b64'
+          $pfx = Join-Path $env:RUNNER_TEMP 'authenticode.pfx'
+          Set-Content -Path $b64 -Value $env:WINDOWS_CERTIFICATE
+          certutil -decode $b64 $pfx | Out-Null
+          $pass = ConvertTo-SecureString -String $env:WINDOWS_CERTIFICATE_PASSWORD -Force -AsPlainText
+          $cert = Import-PfxCertificate -FilePath $pfx -CertStoreLocation Cert:\CurrentUser\My -Password $pass
+          Remove-Item $b64, $pfx
+          # windows-sign.json is consumed by the build step below via WINDOWS_SIGN_CONFIG.
+          Set-Content -Path windows-sign.json -Value ('{"bundle":{"windows":{"certificateThumbprint":"' + $cert.Thumbprint + '"}}}')
+          Add-Content -Path $env:GITHUB_ENV -Value 'WINDOWS_SIGN_CONFIG=--config windows-sign.json'
+
       - name: Build and sign Windows (NSIS)
-        run: pnpm build:win-nsis
+        # WINDOWS_SIGN_CONFIG expands to `--config windows-sign.json` when the
+        # Authenticode step ran, and to nothing otherwise (unsigned binary, but the
+        # pipeline is already gated on the secrets being present).
+        run: pnpm build:win-nsis -- ${{ env.WINDOWS_SIGN_CONFIG }}
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
-          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
 
       - name: Upload Windows installer
         uses: actions/upload-artifact@v4

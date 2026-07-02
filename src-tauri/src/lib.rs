@@ -257,9 +257,19 @@ pub fn run() {
                     &quit_item,
                 ],
             )?;
-            let _tray = TrayIconBuilder::with_id("main")
+            let tray_builder = TrayIconBuilder::with_id("main");
+            // XPLAT tray icon:
+            //  - macOS: black template glyph + icon_as_template(true) — the system
+            //    re-tints it for light/dark menu bars (template semantics are macOS-only).
+            //  - Windows/Linux: a black template glyph is INVISIBLE on dark taskbars and
+            //    icon_as_template is a no-op there — use the full-color app icon instead.
+            #[cfg(target_os = "macos")]
+            let tray_builder = tray_builder
                 .icon(tauri::include_image!("icons/tray-glyph.png"))
-                .icon_as_template(true)
+                .icon_as_template(true);
+            #[cfg(not(target_os = "macos"))]
+            let tray_builder = tray_builder.icon(tauri::include_image!("icons/128x128.png"));
+            let _tray = tray_builder
                 .menu(&menu)
                 .show_menu_on_left_click(false)
                 .on_tray_icon_event(|tray, event| {
@@ -925,6 +935,22 @@ pub fn run() {
                 }
             }
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|_app, _event| {
+            // XPLAT: macOS Dock-icon click must restore the window. Closing the window
+            // only HIDES it (see on_window_event above), and with a hidden window macOS
+            // does not re-show anything on Dock click by itself — it emits
+            // applicationShouldHandleReopen, surfaced by tauri as RunEvent::Reopen
+            // (macOS-only variant in tauri 2, hence the cfg guard). Mirror the tray
+            // "show" action: show + unminimize + focus the main window.
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen { .. } = _event {
+                if let Some(window) = _app.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.unminimize();
+                    let _ = window.set_focus();
+                }
+            }
+        });
 }
