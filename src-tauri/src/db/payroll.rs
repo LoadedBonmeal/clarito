@@ -594,6 +594,13 @@ pub struct EmployeeBreakdown {
     pub sal_cass_leave: Decimal,
     pub sal_tax_leave: Decimal,
     pub indemn_tax: Decimal,
+    /// FIX 1 (audit v0.7.4 wave 3, P1): the taxable-base slice attributable to the medical-leave
+    /// indemnity = leave taxable base (`lr.taxable_base`) − worked-only taxable base
+    /// (`w.taxable_base`) — the same convention as `indemn_tax` (= lr.income_tax − wtax), so
+    /// `indemn_tax ≈ 10% × indemn_taxable_slice`. Wave E in `build_d112_xml` adds this slice back
+    /// into `baza_impozit` (E3_14) for a B-path employee with a diurnă excess, keeping
+    /// E3_15 ≈ 10%×E3_14 AND GL 444 == D112 602. Zero on the A-path.
+    pub indemn_taxable_slice: Decimal,
     pub b_combined_cas: Decimal,
     pub b_combined_cass: Decimal,
     pub b_comb_sal_impozit: Decimal,
@@ -744,11 +751,19 @@ pub async fn compute_payroll_run(
         // assimilated income (incl. taxable diurnă excess), NOT the bare base `gross`.
         // `extra_income` (payroll_extra_income, taxable diurnă excess per employee) is
         // already fetched above (before this loop), so fold it in here.
+        // FIX 3 (audit v0.7.4 wave 3, P2): the SAME total feeds the art. 77 alin. (2)
+        // deduction ceiling (`deducere_plafonata`, plafond = salariul minim + 2.000): the
+        // taxable diurnă surplus is venit ASIMILAT salariilor (art. 76 alin. (2) lit. k)
+        // Cod fiscal), so it counts toward the monthly gross tested against the ceiling.
         let emp_extra = extra_income.get(&e.id).copied().unwrap_or(Decimal::ZERO);
         let ceiling_test_gross = gross_eff + emp_extra;
+        // FIX 2 (audit v0.7.4 wave 3, P2): condiția (b) art. III OUG 89/2025 — carve-out-ul se
+        // acordă DOAR dacă salariul de bază CONTRACTUAL (`gross` = employees.gross_salary, fără
+        // sporuri) = salariul minim al lunii; `suma_netaxabila` aplică gate-ul de egalitate.
         let non_taxable = suma_netaxabila(
             e.beneficiar_suma_netaxabila,
             &e.tip_contract,
+            gross,
             ceiling_test_gross,
             year,
             month,
@@ -780,7 +795,7 @@ pub async fn compute_payroll_run(
                 gross: gross_eff,
                 personal_deduction: crate::anaf_decl::d112::deducere_plafonata(
                     dec(&e.personal_deduction),
-                    gross_eff,
+                    ceiling_test_gross,
                     year,
                     month,
                 ),
@@ -792,7 +807,7 @@ pub async fn compute_payroll_run(
                 gross: lr.worked_gross,
                 personal_deduction: crate::anaf_decl::d112::deducere_plafonata(
                     dec(&e.personal_deduction),
-                    gross_eff,
+                    ceiling_test_gross,
                     year,
                     month,
                 ),
@@ -800,12 +815,15 @@ pub async fn compute_payroll_run(
             });
             let (wcas, wcass, wtax) = (dec(&w.cas), dec(&w.cass), dec(&w.income_tax));
             let indemn_tax = (lr.income_tax - wtax).max(Decimal::ZERO);
+            // FIX 1 (audit v0.7.4 wave 3, P1): taxable-base slice of the indemnity, mirrored on
+            // `indemn_tax` (leave-minus-worked convention) — consumed by Wave E in build_d112_xml.
+            let indemn_taxable_slice = (lr.taxable_base - dec(&w.taxable_base)).max(Decimal::ZERO);
             let sal_cas_leave = wcas;
             let sal_cass_leave = wcass;
             let sal_tax_leave = lr.income_tax - indemn_tax;
             let ded_leave = crate::anaf_decl::d112::deducere_plafonata(
                 dec(&e.personal_deduction),
-                gross_eff,
+                ceiling_test_gross,
                 year,
                 month,
             );
@@ -966,6 +984,7 @@ pub async fn compute_payroll_run(
                 sal_cass_leave,
                 sal_tax_leave,
                 indemn_tax,
+                indemn_taxable_slice,
                 b_combined_cas,
                 b_combined_cass,
                 b_comb_sal_impozit,
@@ -1012,7 +1031,7 @@ pub async fn compute_payroll_run(
             gross: pontaj_gross_eff,
             personal_deduction: crate::anaf_decl::d112::deducere_plafonata(
                 dec(&e.personal_deduction),
-                gross_eff,
+                ceiling_test_gross,
                 year,
                 month,
             ),
@@ -1083,7 +1102,7 @@ pub async fn compute_payroll_run(
             if emp_excess > Decimal::ZERO {
                 let emp_ded = crate::anaf_decl::d112::deducere_plafonata(
                     dec(&e.personal_deduction),
-                    gross_eff,
+                    ceiling_test_gross,
                     year,
                     month,
                 );
@@ -1230,6 +1249,7 @@ pub async fn compute_payroll_run(
             sal_cass_leave: Decimal::ZERO,
             sal_tax_leave: Decimal::ZERO,
             indemn_tax: Decimal::ZERO,
+            indemn_taxable_slice: Decimal::ZERO,
             b_combined_cas: Decimal::ZERO,
             b_combined_cass: Decimal::ZERO,
             b_comb_sal_impozit: Decimal::ZERO,
@@ -1681,6 +1701,10 @@ mod tests {
 
     // ── Wave F: Sporuri + Rețineri ────────────────────────────────────────────
 
+    fn dec2(s: &str) -> Decimal {
+        Decimal::from_str(s).unwrap()
+    }
+
     fn emp_input_f(cnp: &str, name: &str, gross: &str) -> CreateEmployeeInput {
         CreateEmployeeInput {
             company_id: "co1".into(),
@@ -1831,15 +1855,19 @@ mod tests {
     /// FIX 2 (audit wave 3, P1): the 4.300/4.600 RON ceiling test for suma_netaxabilă
     /// (OUG 156/2024 art. LXVI(1)(b)) must use TOTAL venit brut realizat = bază + sporuri,
     /// NOT the bare base salary. August 2026 (H2) ceiling = 4.600 RON, carve-out = 200 RON.
-    /// Angajat: bază 4500 (≤ 4600 alone) + spor 200 → gross_eff 4700 (> 4600).
-    /// Before the fix: ceiling test used bare `gross`=4500 ≤ 4600 → carve-out WRONGLY granted
-    /// (200 non-taxable). After the fix: ceiling test uses gross_eff=4700 > 4600 → carve-out
-    /// correctly DENIED (0 non-taxable) — verified indirectly via total_income_tax/total_net,
-    /// since PayrollRunResult does not expose non_taxable directly.
+    ///
+    /// UPDATED for FIX 2 (audit v0.7.4 wave 3, P2 — base-equality gate, art. III OUG 89/2025
+    /// cond. (b)): the base salary must now EQUAL the min wage for the carve-out at all, so the
+    /// base moved 4500 → 4325 (H2 min wage) and the spor 200 → 300 to keep this test isolating
+    /// the CEILING gate: bază 4325 (= minim, gate (b) trece) + spor 300 → gross_eff 4625 > 4600.
+    /// Before the original fix: ceiling test used bare `gross`=4325 ≤ 4600 → carve-out WRONGLY
+    /// granted (200 non-taxable). After: gross_eff=4625 > 4600 → carve-out correctly DENIED
+    /// (0 non-taxable) — verified indirectly via total_income_tax/total_net, since
+    /// PayrollRunResult does not expose non_taxable directly.
     #[tokio::test]
     async fn suma_netaxabila_ceiling_uses_gross_plus_sporuri_not_bare_base() {
         let pool = setup().await;
-        let mut input = emp_input_f("1", "Ceiling Test", "4500");
+        let mut input = emp_input_f("1", "Ceiling Test", "4325");
         input.tip_contract = Some("N".into());
         input.beneficiar_suma_netaxabila = Some(true);
         let emp = create(&pool, input).await.unwrap();
@@ -1850,7 +1878,7 @@ mod tests {
                 company_id: "co1".into(),
                 employee_id: emp.id.clone(),
                 period: "2026-08".into(),
-                amount: "200".into(),
+                amount: "300".into(),
                 kind: None,
                 description: None,
             },
@@ -1862,21 +1890,89 @@ mod tests {
             .await
             .unwrap();
 
-        // gross_eff = 4700; CAS 25%=1175, CASS 10%=470.
-        // non_taxable must be 0 (gross_eff 4700 > ceiling 4600) — if the bug were still present
-        // (ceiling tested against bare 4500 ≤ 4600), non_taxable would wrongly be 200, reducing
-        // the taxable base by 200 and the income tax by 10%×200=20 lei.
-        // Taxable base = 4700 - 1175 - 470 - 0(non_taxable) - 0(personal_deduction) = 3055.
-        // Income tax = 10% × 3055 = 305.50, rounded to 306.00 per compute_payroll's rounding.
-        assert_eq!(run.total_gross, "4700.00");
-        assert_eq!(run.total_cas, "1175.00");
-        assert_eq!(run.total_cass, "470.00");
+        // gross_eff = 4625; CAS 25%×4625 = 1156.25 → 1156, CASS 10% = 462.50 → 463 (whole-lei
+        // commercial rounding in `pct`).
+        // non_taxable must be 0 (gross_eff 4625 > ceiling 4600) — if the bug were still present
+        // (ceiling tested against bare 4325 ≤ 4600), non_taxable would wrongly be 200: CAS
+        // round(4425×25%)=1106, CASS round(4425×10%)=443, taxable 4625−1106−443−200=2876 → 288.
+        // Correct: taxable base = 4625 − 1156 − 463 − 0(non_taxable) − 0(deduction) = 3006 →
+        // income tax = round(10% × 3006) = 301.
+        assert_eq!(run.total_gross, "4625.00");
+        assert_eq!(run.total_cas, "1156.00");
+        assert_eq!(run.total_cass, "463.00");
         assert_eq!(
-            run.total_income_tax, "306.00",
-            "carve-out must be DENIED (0 non-taxable) because gross_eff 4700 > ceiling 4600 — \
-             if this is 286.00 instead, the ceiling test is still using bare base gross (bug)"
+            run.total_income_tax, "301.00",
+            "carve-out must be DENIED (0 non-taxable) because gross_eff 4625 > ceiling 4600 — \
+             if this is 288.00 instead, the ceiling test is still using bare base gross (bug)"
         );
-        assert_eq!(run.total_net, "2749.00");
+        assert_eq!(run.total_net, "2705.00");
+    }
+
+    /// FIX 3 (audit v0.7.4 wave 3, P2): the art. 77 alin. (2) deduction ceiling (salariul minim +
+    /// 2.000 = 6.050 H1 2026) must be tested on venitul brut lunar INCLUSIV venitul asimilat
+    /// salariilor — the taxable diurnă excess is venit asimilat per art. 76 alin. (2) lit. k)
+    /// Cod fiscal. Boundary pair: gross 6000 + excess 100 = 6100 > 6050 → deducere 0 (before the
+    /// fix the bare gross_eff 6000 ≤ 6050 wrongly granted it); gross 6000 + excess 50 = 6050 =
+    /// plafond (INCLUSIVE) → deducere granted.
+    #[tokio::test]
+    async fn deduction_ceiling_includes_taxable_diurna_excess() {
+        let pool = setup().await;
+        let mut over = emp_input_f("1900101410011", "Aover Plafon", "6000");
+        over.personal_deduction = Some("500".into());
+        let over = create(&pool, over).await.unwrap();
+        let mut at = emp_input_f("1960101410019", "Bat Plafon", "6000");
+        at.personal_deduction = Some("500".into());
+        let at = create(&pool, at).await.unwrap();
+        crate::db::payroll_diurna::upsert_extra_income(
+            &pool,
+            "co1",
+            &over.id,
+            "2026-06",
+            "dec-77-a",
+            dec2("100"),
+            "open",
+        )
+        .await
+        .unwrap();
+        crate::db::payroll_diurna::upsert_extra_income(
+            &pool,
+            "co1",
+            &at.id,
+            "2026-06",
+            "dec-77-b",
+            dec2("50"),
+            "open",
+        )
+        .await
+        .unwrap();
+
+        let bd = compute_payroll_run(&pool, "co1", "2026-06-01", "2026-06-30")
+            .await
+            .unwrap();
+        // ORDER BY full_name: [0] = "Aover Plafon" (excess 100), [1] = "Bat Plafon" (excess 50).
+        let e_over = &bd.employees[0];
+        let e_at = &bd.employees[1];
+
+        // 6000 + 100 = 6100 > 6050 → art. 77(2): deducerea NU se acordă.
+        assert_eq!(
+            e_over.sal_personal_deduction,
+            dec2("0"),
+            "deducerea trebuie refuzată: brut 6000 + excedent diurnă 100 = 6100 > plafond 6050"
+        );
+        // Combined base fără deducere: 6100 − round(6100×25%)=1525 − round(6100×10%)=610 = 3965;
+        // impozit = round(10% × 3965) = 397 (before the fix: base 3465, impozit 347).
+        assert_eq!(e_over.comb_impozit_base, dec2("3965"));
+        assert_eq!(e_over.combined_impozit, dec2("397"));
+
+        // 6000 + 50 = 6050 = plafond → INCLUSIV, deducerea se acordă (500).
+        assert_eq!(
+            e_at.sal_personal_deduction,
+            dec2("500"),
+            "plafonul art. 77(2) e inclusiv: 6050 ≤ 6050 → deducerea rămâne acordată"
+        );
+        // Combined base cu deducere: 6050 − round(1512.50)=1513 − 605 − 500 = 3432 → impozit 343.
+        assert_eq!(e_at.comb_impozit_base, dec2("3432"));
+        assert_eq!(e_at.combined_impozit, dec2("343"));
     }
 
     /// RETINERE-1: angajat net 2925 (brut 5000 = 4000+1000 spor), poprire 800.

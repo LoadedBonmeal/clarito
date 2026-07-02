@@ -411,11 +411,17 @@ async fn build_d112_xml(
     // exact Decimal arithmetic on sal_gross (e.g. 3571.43 for a pontaj-prorated employee). If we
     // re-derived from de.gross (i64, already rounded to whole lei), pontaj precision is lost and
     // GL 4315 ≠ D112 412 for employees with BOTH a pontaj proration AND a diurnă excess.
-    for de in d112_emps.iter_mut() {
-        // Find the breakdown entry for this D112 slot (by CNP).
-        let Some(eb) = breakdown.employees.iter().find(|eb| eb.cnp == de.cnp) else {
-            continue;
-        };
+    // FIX 4 (audit v0.7.4 wave 3, P3): pair by INDEX, not by CNP. `d112_emps` is built 1:1 in the
+    // same order as `breakdown.employees` (the loop above pushes exactly one D112Employee per
+    // breakdown entry), while `employees.cnp` has NO unique constraint (same person, two
+    // contracts) — a find-by-CNP returned the FIRST matching entry for BOTH slots, misfolding the
+    // duplicate-CNP roster (the second contract's excess was silently dropped).
+    debug_assert_eq!(d112_emps.len(), breakdown.employees.len());
+    for (de, eb) in d112_emps.iter_mut().zip(breakdown.employees.iter()) {
+        debug_assert_eq!(
+            de.cnp, eb.cnp,
+            "d112_emps/breakdown.employees order drifted"
+        );
         let excess = eb.excess;
         if excess <= Decimal::ZERO {
             continue;
@@ -430,7 +436,17 @@ async fn build_d112_xml(
         de.baza_cas += excess_lei;
         de.baza_cass += excess_lei;
         de.baza_cam += excess_lei;
-        de.baza_impozit = leid(eb.comb_impozit_base);
+        // FIX 1 (audit v0.7.4 wave 3, P1): B-path (concediu medical) + diurnă excess.
+        // `comb_impozit_base`/`combined_impozit` cover ONLY worked+excess (db/payroll.rs computes
+        // them on `lr.worked_gross + excess`); the medical-leave indemnity income-tax slice —
+        // which the GL keeps on 444 via `indemn.tax` — was dropped here, under-declaring D112 602
+        // by exactly `indemn_tax`. Re-add the slice on BOTH the base (E3_14) and the tax (E3_15),
+        // so E3_15 ≈ 10% × E3_14 still holds AND GL 444 == D112 602 (impozit).
+        de.baza_impozit = if eb.is_leave_path {
+            leid(eb.comb_impozit_base + eb.indemn_taxable_slice)
+        } else {
+            leid(eb.comb_impozit_base)
+        };
         // Part-time min-base lift (art. 146 alin. (5^6)/(5^9)) + diurnă excess: the DECLARED CAS/CASS
         // must stay on the LIFTED base + excess so `B4_8 = ROUND(B4_7 × 25%)` holds (matching the
         // non-excess part-time convention — `de.baza_cas` is the lifted base here). `comb_cas` is only
@@ -446,7 +462,13 @@ async fn build_d112_xml(
             de.cas = comb_cas;
             de.cass = comb_cass;
         }
-        de.impozit = comb_impozit;
+        // FIX 1 (cont.): the leave path re-adds the indemnity tax slice (add-then-round, matching
+        // the GL, which posts 444 = combined salary tax + indemn.tax and rounds the summed total).
+        de.impozit = if eb.is_leave_path {
+            leid(eb.combined_impozit + eb.indemn_tax)
+        } else {
+            comb_impozit
+        };
         de.e3_23 = excess_lei;
     }
 
@@ -2024,7 +2046,17 @@ pub async fn simulate_salary(
         return Err(AppError::Validation("Brut nu poate fi negativ.".into()));
     }
 
-    let non_taxable = suma_netaxabila(opts.beneficiar_suma_netaxabila, "N", gross, year, month);
+    // Simulatorul modelează un singur brut (fără sporuri separate) ⇒ brutul E salariul de bază
+    // contractual: se trece și ca `gross_base` pentru gate-ul de egalitate cu salariul minim
+    // (condiția (b) art. III OUG 89/2025 — FIX 2, audit v0.7.4 wave 3).
+    let non_taxable = suma_netaxabila(
+        opts.beneficiar_suma_netaxabila,
+        "N",
+        gross,
+        gross,
+        year,
+        month,
+    );
     // Deducerea de bază din tabel (art. 77, ancorată pe salariul minim al lunii).
     let deducere_tabel = deducere_personala_tabel(gross, opts.dependents, year, month);
     // Plafonarea art. 77 alin. (2): dacă brut > salariul_minim + 2.000, deducere = 0.
@@ -2066,9 +2098,11 @@ pub async fn simulate_salary(
 /// Inversul simulatorului: date un NET dorit, caută prin căutare binară brut-ul minim din care
 /// rezultă acel net (la leu întreg). Domeniu de căutare: [0, 1.000.000] lei.
 ///
-/// Notă de monotonie: funcția brut → net e în general strict crescătoare, dar la marginile
-/// tranziției suma netaxabilă (4.300→4.301 H1) există un micro-salt descendent de ~10–15 lei în
-/// net (pierderea carve-out-ului). Căutarea binară pe primul brut care atinge target-ul net poate
+/// Notă de monotonie: funcția brut → net e în general strict crescătoare, dar la marginea
+/// carve-out-ului există un micro-salt descendent de ~10–15 lei în net: cu gate-ul de egalitate
+/// bază = salariul minim (condiția (b) art. III OUG 89/2025 — FIX 2, audit v0.7.4 wave 3), suma
+/// netaxabilă se acordă DOAR la brut = salariul minim exact (4.050 H1 / 4.325 H2), deci saltul e
+/// la 4.050→4.051 (H1). Căutarea binară pe primul brut care atinge target-ul net poate
 /// returna un brut mai mic decât maximul, dar acesta e corect fiscal pentru acel net.
 /// Dacă targetul nu e atins (ex. net > 1.000.000), returnează Err.
 #[tauri::command]
@@ -2104,7 +2138,15 @@ pub async fn simulate_salary_from_net(
     // net(gross) helper: returns the Decimal net for a given gross (integer leu).
     let net_for = |g: i64| -> Decimal {
         let gross = Decimal::from(g);
-        let non_taxable = suma_netaxabila(opts.beneficiar_suma_netaxabila, "N", gross, year, month);
+        // Un singur brut (= salariul de bază contractual) — vezi nota din `simulate_salary`.
+        let non_taxable = suma_netaxabila(
+            opts.beneficiar_suma_netaxabila,
+            "N",
+            gross,
+            gross,
+            year,
+            month,
+        );
         let deducere_tabel = deducere_personala_tabel(gross, opts.dependents, year, month);
         let deducere_platita = deducere_plafonata(deducere_tabel, gross, year, month);
         let r = compute_payroll(&PayrollInput {

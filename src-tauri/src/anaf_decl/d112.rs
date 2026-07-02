@@ -208,20 +208,33 @@ fn carve_out_gross_ceiling(year: i32, month: u32) -> Decimal {
 /// realizat (fără tichete/vouchere) ≤ 4.300 sem. I / 4.600 sem. II inclusiv; (d) angajatorul nu a
 /// diminuat salariul de bază între 01.01.2026 și 31.12.2026.
 ///
-/// `beneficiar` este ATESTAREA contabilului că (b)+(d) sunt îndeplinite (aplicația nu modelează
-/// salariul de bază contractual separat de brut, nici istoricul diminuărilor). Aici aplicăm automat
-/// (a) normă întreagă + (c) plafonul brut; restul țin de flag. Întoarce 0 dacă nu se aplică.
+/// `gross_base` = salariul de bază CONTRACTUAL al lunii (fără sporuri) — `employees.gross_salary`;
+/// sporurile sunt modelate separat (`payroll_sporuri`), deci brutul de bază E salariul contractual.
+/// Condiția (b) se aplică automat aici: `gross_base != salariul minim` ⇒ 0 (art. III OUG 89/2025 —
+/// carve-out-ul se acordă DOAR salariaților plătiți exact la minim). `gross` = venitul brut realizat
+/// TOTAL (bază + sporuri + venituri asimilate, incl. excedent diurnă) pentru plafonul (c).
+///
+/// `beneficiar` rămâne ATESTAREA contabilului pentru (d) (aplicația nu modelează istoricul
+/// diminuărilor salariului de bază). Aici aplicăm automat (a) normă întreagă + (b) baza = minim +
+/// (c) plafonul brut; (d) ține de flag. Întoarce 0 dacă nu se aplică.
 ///
 /// Limitare cunoscută: nu se prorata pe zile pentru luni parțiale (angajare/încetare la mijlocul
 /// lunii) — se aplică suma întreagă (conservator), aliniat cu [`part_time_min_base`].
 pub fn suma_netaxabila(
     beneficiar: bool,
     tip_contract: &str,
+    gross_base: Decimal,
     gross: Decimal,
     year: i32,
     month: u32,
 ) -> Decimal {
     if !beneficiar || tip_contract != "N" || gross <= Decimal::ZERO {
+        return Decimal::ZERO;
+    }
+    // Condiția (b) art. III OUG 89/2025 (continuă OUG 156/2024 art. LXVI(1)(a)): salariul de bază
+    // contractual trebuie să fie EGAL cu salariul minim brut în vigoare în luna respectivă.
+    // Sub SAU peste minim ⇒ carve-out-ul nu se acordă deloc.
+    if gross_base != min_wage_lei(year, month) {
         return Decimal::ZERO;
     }
     // Sumă + plafon din sursa unică keyed pe (an, lună): 300/4.300 sem. I, 200/4.600 sem. II 2026.
@@ -743,20 +756,88 @@ mod tests {
 
     #[test]
     fn suma_netaxabila_gating() {
+        // Args: (beneficiar, tip_contract, gross_base = salariul de bază contractual, gross =
+        // venitul brut realizat total, year, month).
         // Sem. I (≤6): 300 lei for a full-time beneficiary; sem. II (≥7): 200 lei.
-        assert_eq!(suma_netaxabila(true, "N", d("4050"), 2026, 3), d("300"));
-        assert_eq!(suma_netaxabila(true, "N", d("4325"), 2026, 8), d("200"));
+        assert_eq!(
+            suma_netaxabila(true, "N", d("4050"), d("4050"), 2026, 3),
+            d("300")
+        );
+        assert_eq!(
+            suma_netaxabila(true, "N", d("4325"), d("4325"), 2026, 8),
+            d("200")
+        );
         // Not a beneficiary → 0.
-        assert_eq!(suma_netaxabila(false, "N", d("4050"), 2026, 3), d("0"));
+        assert_eq!(
+            suma_netaxabila(false, "N", d("4050"), d("4050"), 2026, 3),
+            d("0")
+        );
         // Part-time (Pi) → 0 (measure is full-time only).
-        assert_eq!(suma_netaxabila(true, "P1", d("4050"), 2026, 3), d("0"));
+        assert_eq!(
+            suma_netaxabila(true, "P1", d("4050"), d("4050"), 2026, 3),
+            d("0")
+        );
         // Exactly AT the ceiling is INCLUSIVE (≤ 4.300 H1 / 4.600 H2) — boundary lock (TEST-01).
-        assert_eq!(suma_netaxabila(true, "N", d("4300"), 2026, 3), d("300"));
-        assert_eq!(suma_netaxabila(true, "N", d("4600"), 2026, 8), d("200"));
+        // Base stays = min wage; the realized gross (base + sporuri/asimilate) tests the ceiling.
+        assert_eq!(
+            suma_netaxabila(true, "N", d("4050"), d("4300"), 2026, 3),
+            d("300")
+        );
+        assert_eq!(
+            suma_netaxabila(true, "N", d("4325"), d("4600"), 2026, 8),
+            d("200")
+        );
         // Just OVER the ceiling → whole benefit lost.
-        assert_eq!(suma_netaxabila(true, "N", d("4301"), 2026, 3), d("0"));
-        assert_eq!(suma_netaxabila(true, "N", d("4500"), 2026, 8), d("200")); // 4500 ≤ 4600 H2
-        assert_eq!(suma_netaxabila(true, "N", d("4601"), 2026, 8), d("0"));
+        assert_eq!(
+            suma_netaxabila(true, "N", d("4050"), d("4301"), 2026, 3),
+            d("0")
+        );
+        assert_eq!(
+            suma_netaxabila(true, "N", d("4325"), d("4500"), 2026, 8),
+            d("200")
+        ); // 4500 ≤ 4600 H2
+        assert_eq!(
+            suma_netaxabila(true, "N", d("4325"), d("4601"), 2026, 8),
+            d("0")
+        );
+    }
+
+    /// FIX 2 (audit v0.7.4 wave 3, P2) — condiția (b) art. III OUG 89/2025 (continuă OUG 156/2024
+    /// art. LXVI(1)(a)): carve-out-ul se acordă DOAR dacă salariul de bază contractual (fără
+    /// sporuri) = salariul minim brut în vigoare în lună (4.050 sem. I / 4.325 sem. II 2026).
+    #[test]
+    fn suma_netaxabila_base_salary_must_equal_min_wage() {
+        // Base = min wage of the month → granted.
+        assert_eq!(
+            suma_netaxabila(true, "N", d("4050"), d("4050"), 2026, 3),
+            d("300")
+        );
+        // H2: base stuck at the OLD minimum (4050 ≠ 4325) → 0 (the employer must raise the base
+        // to the new minimum to keep the benefit after 1 July).
+        assert_eq!(
+            suma_netaxabila(true, "N", d("4050"), d("4050"), 2026, 8),
+            d("0")
+        );
+        // H2: base = new minimum 4325 → 200.
+        assert_eq!(
+            suma_netaxabila(true, "N", d("4325"), d("4325"), 2026, 8),
+            d("200")
+        );
+        // H1: base ABOVE the minimum (4200 ≠ 4050) → 0 even though gross ≤ 4300 ceiling.
+        assert_eq!(
+            suma_netaxabila(true, "N", d("4200"), d("4200"), 2026, 3),
+            d("0")
+        );
+        // Base below the minimum (illegal full-time contract, defensive) → 0.
+        assert_eq!(
+            suma_netaxabila(true, "N", d("4000"), d("4000"), 2026, 3),
+            d("0")
+        );
+        // Scale-insensitive Decimal equality: 4050.00 == 4050.
+        assert_eq!(
+            suma_netaxabila(true, "N", d("4050.00"), d("4050"), 2026, 3),
+            d("300")
+        );
     }
 
     #[test]
