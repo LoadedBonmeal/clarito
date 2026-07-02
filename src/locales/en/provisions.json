@@ -1,0 +1,66 @@
+{
+  "provisions": {
+    "title": "Provisions",
+    "sub": "{{count}} provisions · class 15x",
+    "selectCompany": "Select a company.",
+    "loading": "Loading…",
+    "errorLabel": "provisions",
+    "periodTitle": "Month for the reversal",
+    "create": "Recognize",
+    "table": {
+      "account": "ACCOUNT",
+      "description": "DESCRIPTION",
+      "amount": "AMOUNT",
+      "deductible": "DEDUCT.",
+      "status": "STATUS"
+    },
+    "empty": {
+      "title": "No provisions.",
+      "hint": "Recognize a provision when the 3 conditions (OMFP 1802 pt. 374) are cumulatively met."
+    },
+    "chip": {
+      "deductible": "deductible",
+      "nonDeductible": "non-deductible",
+      "reversed": "reversed {{period}}",
+      "active": "active"
+    },
+    "row": {
+      "reverseIn": "Reverse in {{period}}",
+      "delete": "Delete"
+    },
+    "notify": {
+      "created": "Provision recognized (D 6812 / C 15x).",
+      "createError": "Error while recognizing.",
+      "reversed": "Provision reversed (D 15x / C 7812).",
+      "reverseError": "Error while reversing.",
+      "deleted": "Provision deleted.",
+      "deleteError": "Error while deleting."
+    },
+    "accounts": {
+      "1511": "Litigation",
+      "1512": "Warranties granted to customers",
+      "1513": "Asset decommissioning",
+      "1514": "Restructuring",
+      "1515": "Pensions and similar obligations",
+      "1518": "Other provisions"
+    },
+    "modal": {
+      "title": "Recognize provision",
+      "subtitle": "Posts D 6812 / C 15x. The 3 conditions (pt. 374) are mandatory.",
+      "account": "Provision account",
+      "amount": "Amount (RON)",
+      "description": "Description",
+      "descriptionPh": "e.g. Commercial litigation X",
+      "probability": "Probability",
+      "createdMonth": "Recognition month",
+      "deductibleLabel": "Tax deductible (Fiscal Code art. 26 — usually NOT)",
+      "conditionsTitle": "Cumulative recognition conditions (OMFP 1802 pt. 374):",
+      "c1": "Present obligation from a past event",
+      "c2": "Probable outflow of resources",
+      "c3": "Reliable estimate of the amount",
+      "cancel": "Cancel",
+      "posting": "Posting…",
+      "submit": "Recognize"
+    }
+  }
+}

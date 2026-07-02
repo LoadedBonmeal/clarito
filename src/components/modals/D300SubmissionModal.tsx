@@ -13,6 +13,7 @@ import { useTranslation } from "react-i18next";
 
 import { Ic } from "@/components/shared/Ic";
 import { useAnimatedClose } from "@/hooks/use-animated-close";
+import { useModalFocus } from "@/hooks/use-modal-focus";
 import type { Company, D300Submission } from "@/types";
 
 // ── Period helpers (Wave 5 FIX 1) ─────────────────────────────────────────────
@@ -138,6 +139,7 @@ export function D300SubmissionModal({ open, onOpenChange, company, year, month, 
   const [proRata,          setProRata]          = useState(100.0);
 
   const { closing, close } = useAnimatedClose(useCallback(() => onOpenChange(false), [onOpenChange]));
+  const dialogRef = useModalFocus<HTMLDivElement>(open);
 
   // Esc closes the modal.
   useEffect(() => {
@@ -197,7 +199,15 @@ export function D300SubmissionModal({ open, onOpenChange, company, year, month, 
       style={{ position: "fixed" }}
       onMouseDown={(e) => { if (e.target === e.currentTarget) close(); }}
     >
-      <div className="modal" style={{ width: 560 }}>
+      <div
+        ref={dialogRef}
+        tabIndex={-1}
+        className="modal"
+        style={{ width: 560 }}
+        role="dialog"
+        aria-modal="true"
+        aria-label={t("shared.d300.title")}
+      >
         <div className="modal-head">
           <div>
             <div className="mt">{t("shared.d300.title")}</div>

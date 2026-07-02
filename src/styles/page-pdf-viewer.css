@@ -97,7 +97,8 @@
   height: 32px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #fff;
+  /* Toolbar control — follows the theme (matches .select), readable in dark mode. */
+  background: var(--bg-content, #fff);
   font-size: 12.5px;
   color: var(--text);
   padding: 0 6px;
@@ -129,7 +130,8 @@
   height: 30px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #fff;
+  /* Search field — follows the theme (matches .input), readable in dark mode. */
+  background: var(--bg-content, #fff);
   padding: 0 10px;
   font-size: 13px;
   color: var(--text);
@@ -164,7 +166,10 @@
   position: relative;
   overflow-y: auto;
   border-right: 1px solid var(--line);
-  background: #fff;
+  /* Rail is viewer chrome, not paper — follows the theme so the var(--text-2)
+     page numbers (.pdfv-thumb-n) stay readable in dark mode. The page thumbnails
+     themselves (.pdfv-thumb-img) stay pinned white below (rendered PDF paper). */
+  background: var(--bg-content, #fff);
   padding: 8px 0;
 }
 .pdfv-thumb {

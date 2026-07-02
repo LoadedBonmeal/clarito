@@ -1,0 +1,86 @@
+{
+  "capitalGoods": {
+    "title": "Registrul bunurilor de capital",
+    "shortTitle": "Bunuri de capital",
+    "sub": "{{count}} bunuri · ajustare TVA art. 305 (5 ani mobil / 20 ani imobil)",
+    "selectCompany": "Selectați o companie.",
+    "loading": "Se încarcă…",
+    "errorLabel": "bunurile de capital",
+    "add": "Adaugă bun",
+    "table": {
+      "description": "DESCRIERE",
+      "kind": "TIP",
+      "acquisition": "ACHIZIȚIE",
+      "vatDeducted": "TVA DEDUSĂ",
+      "initialPct": "% INIȚIAL",
+      "status": "STATUS"
+    },
+    "empty": {
+      "title": "Niciun bun de capital.",
+      "hint": "Înregistrați imobilizările cu TVA dedusă supusă ajustării (art. 305)."
+    },
+    "kind": {
+      "immovable": "imobil · 20 ani",
+      "movable": "mobil · 5 ani"
+    },
+    "status": {
+      "disposed": "cesionat",
+      "active": "activ"
+    },
+    "row": {
+      "viewAdjustments": "Vezi ajustările",
+      "delete": "Șterge"
+    },
+    "notify": {
+      "created": "Bun de capital înregistrat.",
+      "createError": "Eroare la înregistrare.",
+      "deleted": "Bun de capital șters.",
+      "deleteError": "Eroare la ștergere.",
+      "adjRecorded": "Ajustare înregistrată și postată în GL.",
+      "adjError": "Eroare la înregistrarea ajustării."
+    },
+    "panel": {
+      "meta": "Bază TVA {{vat}} · perioada de ajustare {{years}} ani · tranșă anuală {{slice}}",
+      "record": "Înregistrează ajustare",
+      "none": "Nicio ajustare — bunul își păstrează utilizarea inițială.",
+      "table": {
+        "year": "AN",
+        "newPct": "% NOU",
+        "adjustment": "AJUSTARE",
+        "period": "PERIOADĂ",
+        "gl": "GL"
+      },
+      "posted": "postat"
+    },
+    "createModal": {
+      "title": "Adaugă bun de capital",
+      "subtitle": "Perioada de ajustare: 5 ani (mobil) / 20 ani (imobil) — Cod fiscal art. 305.",
+      "description": "Descriere",
+      "descriptionPh": "ex. Hală producție",
+      "kind": "Tip",
+      "kindImmovable": "Imobil (20 ani)",
+      "kindMovable": "Mobil / servicii (5 ani)",
+      "acquisitionDate": "Data achiziției",
+      "baseValue": "Valoare de bază (lei)",
+      "vatDeducted": "TVA dedusă (lei)",
+      "initialPct": "% deducere inițial",
+      "cancel": "Anulează",
+      "saving": "Se salvează…",
+      "save": "Adaugă"
+    },
+    "recordModal": {
+      "title": "Înregistrează ajustare TVA",
+      "subtitle": "{{description}} · {{years}} ani · deducere inițială {{pct}}%",
+      "yearLabel": "An din perioadă (1–{{years}})",
+      "newPct": "% deducere nou",
+      "period": "Perioadă (decont)",
+      "computed": "Ajustare calculată (1/{{years}} × Δ% × TVA):",
+      "clawback": "Clawback — D 635 / C 4426 (TVA dedusă devine cost).",
+      "extra": "Deducere suplimentară — D 4426 / C 635.",
+      "noChange": "Fără ajustare (utilizare neschimbată).",
+      "cancel": "Anulează",
+      "posting": "Se postează…",
+      "submit": "Înregistrează + postează"
+    }
+  }
+}

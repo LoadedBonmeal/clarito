@@ -112,9 +112,9 @@ export function Sidebar() {
       { key: "deconturi", label: t("shell.nav.deconturi"), icon: "banknotes", path: "/deconturi", matchPrefix: "/deconturi", more: true },
       { key: "cecuri", label: t("shell.nav.paymentInstruments"), icon: "banknotes", path: "/payment-instruments", more: true },
       { key: "contracte", label: t("shell.nav.contracts"), icon: "docText", path: "/contracts", more: true },
-      { key: "accruals", label: "Chelt./venit în avans", icon: "calc", path: "/accruals", more: true },
-      { key: "provizioane", label: "Provizioane", icon: "scale", path: "/provisions", more: true },
-      { key: "bunuri-capital", label: "Bunuri de capital", icon: "building", path: "/capital-goods", more: true },
+      { key: "accruals", label: t("shell.nav.accruals"), icon: "calc", path: "/accruals", more: true },
+      { key: "provizioane", label: t("shell.nav.provisions"), icon: "scale", path: "/provisions", more: true },
+      { key: "bunuri-capital", label: t("shell.nav.capitalGoods"), icon: "building", path: "/capital-goods", more: true },
     ]},
     { id: "stocuri", sec: t("shell.nav.groupStock"), items: [
       { key: "nir", label: t("shell.nav.nir"), icon: "docDown", path: "/nir" },

@@ -40,23 +40,23 @@ const fmtDate = (iso: string | null | undefined) => {
   return `${d} ${RO_MON[Number(m) - 1] ?? m} ${y}`;
 };
 
-const statusBadge = (s: string) => {
-  const map: Record<string, string> = {
-    granted: "badge badge--blue",
-    settled: "badge badge--green",
-    returned: "badge badge--gray",
-    draft: "badge badge--yellow",
-    approved: "badge badge--green",
-  };
-  const labels: Record<string, string> = {
-    granted: "Acordat",
-    settled: "Decontat",
-    returned: "Restituit",
-    draft: "Ciornă",
-    approved: "Aprobat",
-  };
-  return <span className={map[s] ?? "badge"}>{labels[s] ?? s}</span>;
+const STATUS_BADGE_CLASS: Record<string, string> = {
+  granted: "badge badge--blue",
+  settled: "badge badge--green",
+  returned: "badge badge--gray",
+  draft: "badge badge--yellow",
+  approved: "badge badge--green",
 };
+
+/** Status badge — labels live in locales (deconturi.status.*). */
+function StatusBadge({ s }: { s: string }) {
+  const { t } = useTranslation();
+  return (
+    <span className={STATUS_BADGE_CLASS[s] ?? "badge"}>
+      {t(`deconturi.status.${s}`, { defaultValue: s })}
+    </span>
+  );
+}
 
 // ── Empty line template ───────────────────────────────────────────────────────
 type LineForm = {
@@ -75,46 +75,48 @@ const emptyLine = (): LineForm => ({
   accountCode: "",
 });
 
-const CATEGORIES: { value: ExpenseLineInput["category"]; label: string }[] = [
-  { value: "diurna", label: "Diurnă" },
-  { value: "transport", label: "Transport" },
-  { value: "cazare", label: "Cazare" },
-  { value: "combustibil", label: "Combustibil" },
-  { value: "alte", label: "Alte cheltuieli" },
+/** Category codes — the human labels live in locales (deconturi.categories.*). */
+const CATEGORY_VALUES: ExpenseLineInput["category"][] = [
+  "diurna",
+  "transport",
+  "cazare",
+  "combustibil",
+  "alte",
 ];
 
 // ── DiurnaPanel ───────────────────────────────────────────────────────────────
 function DiurnaPanel({ calc }: { calc: DiurnaCalc }) {
+  const { t } = useTranslation();
   const impozabil = parseFloat(calc.diurnaImpozabila) > 0;
   return (
     <div className="decont-diurna-panel">
       <div className="decont-diurna-grid">
         <div>
-          <div className="decont-diurna-label">Diurnă acordată</div>
+          <div className="decont-diurna-label">{t("deconturi.diurna.granted")}</div>
           <div className="decont-diurna-value">{fmtRON(calc.diurnaAcordata)}</div>
         </div>
         <div>
-          <div className="decont-diurna-label">Neimpozabilă</div>
+          <div className="decont-diurna-label">{t("deconturi.diurna.nonTaxable")}</div>
           <div className="decont-diurna-value decont-diurna-green">{fmtRON(calc.diurnaNeimpozabila)}</div>
         </div>
         <div>
-          <div className="decont-diurna-label">Impozabilă</div>
+          <div className="decont-diurna-label">{t("deconturi.diurna.taxable")}</div>
           <div className={`decont-diurna-value${impozabil ? " decont-diurna-red" : ""}`}>
             {fmtRON(calc.diurnaImpozabila)}
           </div>
         </div>
       </div>
       <div className="decont-diurna-caps">
-        <span>Plafon A (2,5×23 lei): <strong>{fmtRON(calc.limitAZi)}/zi</strong></span>
+        <span>{t("deconturi.diurna.capALabel")} <strong>{t("deconturi.diurna.perDay", { value: fmtRON(calc.limitAZi) })}</strong></span>
         {" · "}
-        <span>Plafon B (sal×3/{calc.workingDaysUsed} zile luc.): <strong>{fmtRON(calc.limitBZi)}/zi</strong></span>
+        <span>{t("deconturi.diurna.capBLabel", { days: calc.workingDaysUsed })} <strong>{t("deconturi.diurna.perDay", { value: fmtRON(calc.limitBZi) })}</strong></span>
         {" · "}
-        <span>Cap aplicat: <strong>{fmtRON(calc.capZi)}/zi</strong></span>
+        <span>{t("deconturi.diurna.capAppliedLabel")} <strong>{t("deconturi.diurna.perDay", { value: fmtRON(calc.capZi) })}</strong></span>
       </div>
       {impozabil && (
         <div className="decont-diurna-warn">
-          <strong>Atenție:</strong> Surplusul impozabil de {fmtRON(calc.diurnaImpozabila)} trebuie raportat
-          la statul de salarii (inclusă în baza de calcul CAS/CASS/impozit). NU este postat automat în GL.
+          <strong>{t("deconturi.diurna.warnTitle")}</strong>{" "}
+          {t("deconturi.diurna.warnBody", { amount: fmtRON(calc.diurnaImpozabila) })}
         </div>
       )}
     </div>
@@ -123,7 +125,7 @@ function DiurnaPanel({ calc }: { calc: DiurnaCalc }) {
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 export function DeconturiPage() {
-  useTranslation(); // initializes i18n context
+  const { t } = useTranslation();
   const companyId = useAppStore((s) => s.activeCompanyId);
   const qc = useQueryClient();
   const [tab, setTab] = useState<"avansuri" | "deconturi">("avansuri");
@@ -180,7 +182,7 @@ export function DeconturiPage() {
   // ── Advance mutations ─────────────────────────────────────────────────────
   const createAdvance = useMutation({
     mutationFn: () => {
-      if (!companyId) throw new Error("Selectați o companie");
+      if (!companyId) throw new Error(t("deconturi.selectCompanyErr"));
       return api.deconturi.createAdvance({
         companyId,
         employeeId: advEmployee.trim() || null,
@@ -195,36 +197,36 @@ export function DeconturiPage() {
       setAdvAmount("");
       setAdvEmployee("");
       setAdvNotes("");
-      notify.success("Avans acordat și înregistrat în GL (542).");
+      notify.success(t("deconturi.advances.notify.granted"));
     },
-    onError: (e) => notify.error(formatError(e, "Eroare la acordarea avansului.")),
+    onError: (e) => notify.error(formatError(e, t("deconturi.advances.notify.grantError"))),
   });
 
   const returnAdvance = useMutation({
     mutationFn: (id: string) => {
-      if (!companyId) throw new Error("Selectați o companie");
+      if (!companyId) throw new Error(t("deconturi.selectCompanyErr"));
       return api.deconturi.returnAdvance(id, companyId, returnDate);
     },
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["treasury_advances", companyId ?? ""] });
       setReturningId(null);
-      notify.success("Avans restituit. Nota GL (5311/542) înregistrată.");
+      notify.success(t("deconturi.advances.notify.returned"));
     },
-    onError: (e) => notify.error(formatError(e, "Eroare la restituire.")),
+    onError: (e) => notify.error(formatError(e, t("deconturi.advances.notify.returnError"))),
   });
 
   const deleteAdvance = useMutation({
     mutationFn: async (id: string) => {
-      const ok = await confirm("Ștergeți definitiv acest avans?", { kind: "warning" });
+      const ok = await confirm(t("deconturi.advances.confirmDelete"), { kind: "warning" });
       if (!ok) throw new Error("cancelled");
       return api.deconturi.deleteAdvance(id, companyId!);
     },
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["treasury_advances", companyId ?? ""] });
-      notify.success("Avans șters.");
+      notify.success(t("deconturi.advances.notify.deleted"));
     },
     onError: (e) => {
-      if ((e as Error).message !== "cancelled") notify.error(formatError(e, "Eroare la ștergere."));
+      if ((e as Error).message !== "cancelled") notify.error(formatError(e, t("deconturi.advances.notify.deleteError")));
     },
   });
 
@@ -256,7 +258,7 @@ export function DeconturiPage() {
   // ── Report mutations ──────────────────────────────────────────────────────
   const createReport = useMutation({
     mutationFn: () => {
-      if (!companyId) throw new Error("Selectați o companie");
+      if (!companyId) throw new Error(t("deconturi.selectCompanyErr"));
       return api.deconturi.createReport({
         companyId,
         advanceId: rAdvanceId || null,
@@ -294,14 +296,14 @@ export function DeconturiPage() {
       setLines([emptyLine()]);
       setLiveCalc(null);
       setSelectedReport(full);
-      notify.success("Decont creat (ciornă).");
+      notify.success(t("deconturi.reports.notify.created"));
     },
-    onError: (e) => notify.error(formatError(e, "Eroare la creare decont.")),
+    onError: (e) => notify.error(formatError(e, t("deconturi.reports.notify.createError"))),
   });
 
   const approveReport = useMutation({
     mutationFn: (id: string) => {
-      if (!companyId) throw new Error("Selectați o companie");
+      if (!companyId) throw new Error(t("deconturi.selectCompanyErr"));
       return api.deconturi.approveReport(id, companyId, approveDate);
     },
     onSuccess: (full) => {
@@ -309,24 +311,24 @@ export function DeconturiPage() {
       void qc.invalidateQueries({ queryKey: ["treasury_advances", companyId ?? ""] });
       setApprovingId(null);
       setSelectedReport(full);
-      notify.success("Decont aprobat. Nota GL înregistrată.");
+      notify.success(t("deconturi.reports.notify.approved"));
     },
-    onError: (e) => notify.error(formatError(e, "Eroare la aprobare.")),
+    onError: (e) => notify.error(formatError(e, t("deconturi.reports.notify.approveError"))),
   });
 
   const deleteReport = useMutation({
     mutationFn: async (id: string) => {
-      const ok = await confirm("Ștergeți definitiv acest decont?", { kind: "warning" });
+      const ok = await confirm(t("deconturi.reports.confirmDelete"), { kind: "warning" });
       if (!ok) throw new Error("cancelled");
       return api.deconturi.deleteReport(id, companyId!);
     },
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["expense_reports", companyId ?? ""] });
       if (selectedReport?.report.id === approvingId) setSelectedReport(null);
-      notify.success("Decont șters.");
+      notify.success(t("deconturi.reports.notify.deleted"));
     },
     onError: (e) => {
-      if ((e as Error).message !== "cancelled") notify.error(formatError(e, "Eroare la ștergere."));
+      if ((e as Error).message !== "cancelled") notify.error(formatError(e, t("deconturi.reports.notify.deleteError")));
     },
   });
 
@@ -348,7 +350,7 @@ export function DeconturiPage() {
     return (
       <div className="main-inner">
         <div className="state-row muted">
-          <p>Selectați o companie pentru a gestiona deconturile.</p>
+          <p>{t("deconturi.selectCompany")}</p>
         </div>
       </div>
     );
@@ -359,9 +361,9 @@ export function DeconturiPage() {
       {/* ── Header ── */}
       <div className="page-head">
         <div>
-          <h1>Deconturi &amp; Avansuri de trezorerie</h1>
+          <h1>{t("deconturi.title")}</h1>
           <p className="sub">
-            Avansuri acordate angajatilor si deconturi de cheltuieli · {companyName}
+            {t("deconturi.sub", { company: companyName })}
           </p>
         </div>
         <div className="head-actions">
@@ -370,7 +372,7 @@ export function DeconturiPage() {
             disabled={!advAmount || !advDate || createAdvance.isPending}
             onClick={() => { setTab("avansuri"); createAdvance.mutate(); }}
           >
-            <Ic name="plus" /> Acorda avans
+            <Ic name="plus" /> {t("deconturi.grantForm.submit")}
           </button>
         </div>
       </div>
@@ -383,13 +385,13 @@ export function DeconturiPage() {
               className={"tab" + (tab === "avansuri" ? " active" : "")}
               onClick={() => setTab("avansuri")}
             >
-              Avansuri de trezorerie<span className="cnt">{advances.length}</span>
+              {t("deconturi.tabs.advances")}<span className="cnt">{advances.length}</span>
             </div>
             <div
               className={"tab" + (tab === "deconturi" ? " active" : "")}
               onClick={() => setTab("deconturi")}
             >
-              Deconturi<span className="cnt">{reports.length}</span>
+              {t("deconturi.tabs.reports")}<span className="cnt">{reports.length}</span>
             </div>
           </div>
           <div className="spacer" />
@@ -397,20 +399,20 @@ export function DeconturiPage() {
 
         {/* ── "Acorda avans" inline form (always visible, export style) ── */}
         <div style={{ padding: "4px 16px 0" }}>
-          <div style={{ fontSize: 13, fontWeight: 600, padding: "12px 0 2px" }}>Acorda avans</div>
+          <div style={{ fontSize: 13, fontWeight: 600, padding: "12px 0 2px" }}>{t("deconturi.grantForm.title")}</div>
         </div>
         <div className="fgrid-form">
           <div className="field">
-            <label>Angajat</label>
+            <label>{t("deconturi.grantForm.employee")}</label>
             <input
               className="input"
               value={advEmployee}
               onChange={(e) => setAdvEmployee(e.target.value)}
-              placeholder="Selecteaza angajat…"
+              placeholder={t("deconturi.grantForm.employeePh")}
             />
           </div>
           <div className="field">
-            <label>Suma (RON)</label>
+            <label>{t("deconturi.grantForm.amount")}</label>
             <input
               className="input num"
               type="number"
@@ -418,12 +420,12 @@ export function DeconturiPage() {
               min="0"
               value={advAmount}
               onChange={(e) => setAdvAmount(e.target.value)}
-              placeholder="0,00"
+              placeholder={t("deconturi.grantForm.amountPh")}
               style={{ textAlign: "right" }}
             />
           </div>
           <div className="field">
-            <label>Data</label>
+            <label>{t("deconturi.grantForm.date")}</label>
             <input
               className="input num"
               type="date"
@@ -432,23 +434,23 @@ export function DeconturiPage() {
             />
           </div>
           <div className="field">
-            <label>Scop</label>
+            <label>{t("deconturi.grantForm.purpose")}</label>
             <input
               className="input"
               value={advNotes}
               onChange={(e) => setAdvNotes(e.target.value)}
-              placeholder="ex. deplasare, achizitii"
+              placeholder={t("deconturi.grantForm.purposePh")}
             />
           </div>
           <div className="field">
-            <label>Mod plată</label>
+            <label>{t("deconturi.grantForm.method")}</label>
             <select
               className="select"
               value={advMethod}
               onChange={(e) => setAdvMethod(e.target.value as "cash" | "bank")}
             >
-              <option value="cash">Numerar (5311)</option>
-              <option value="bank">Transfer bancar (5121)</option>
+              <option value="cash">{t("deconturi.grantForm.methodCash")}</option>
+              <option value="bank">{t("deconturi.grantForm.methodBank")}</option>
             </select>
           </div>
         </div>
@@ -459,7 +461,7 @@ export function DeconturiPage() {
             onClick={() => createAdvance.mutate()}
           >
             <Ic name="banknotes" />
-            {createAdvance.isPending ? "Se procesează..." : "Acorda avans"}
+            {createAdvance.isPending ? t("deconturi.grantForm.processing") : t("deconturi.grantForm.submit")}
           </button>
         </div>
       </div>
@@ -468,17 +470,17 @@ export function DeconturiPage() {
       {tab === "avansuri" && (
         <div className="scr-card">
           <div className="scr-toolbar">
-            <div className="tt">Avansuri acordate</div>
+            <div className="tt">{t("deconturi.advances.listTitle")}</div>
           </div>
           <table className="scr-table">
             <thead>
               <tr>
-                <th style={{ width: 130 }}>Data</th>
-                <th>Angajat</th>
-                <th>Scop</th>
-                <th className="r" style={{ width: 130 }}>Suma acordata</th>
-                <th className="r" style={{ width: 130 }}>Sold de decontat</th>
-                <th style={{ width: 120 }}>Status</th>
+                <th style={{ width: 130 }}>{t("deconturi.advances.table.date")}</th>
+                <th>{t("deconturi.advances.table.employee")}</th>
+                <th>{t("deconturi.advances.table.purpose")}</th>
+                <th className="r" style={{ width: 130 }}>{t("deconturi.advances.table.amount")}</th>
+                <th className="r" style={{ width: 130 }}>{t("deconturi.advances.table.balance")}</th>
+                <th style={{ width: 120 }}>{t("deconturi.advances.table.status")}</th>
                 <th style={{ width: 120 }}></th>
               </tr>
             </thead>
@@ -488,8 +490,8 @@ export function DeconturiPage() {
                   <td colSpan={7} style={{ padding: 0 }}>
                     <div className="empty">
                       <div className="ei"><Ic name="banknotes" /></div>
-                      <b>Niciun avans acordat.</b>
-                      Completati formularul de mai sus pentru a acorda un avans.
+                      <b>{t("deconturi.advances.empty.title")}</b>
+                      {t("deconturi.advances.empty.hint")}
                     </div>
                   </td>
                 </tr>
@@ -503,7 +505,7 @@ export function DeconturiPage() {
                     <td>{adv.notes ?? "—"}</td>
                     <td className="r">{fmtRON(adv.amount)}</td>
                     <td className="r">{fmtRON(adv.amount)}</td>
-                    <td>{statusBadge(adv.status)}</td>
+                    <td><StatusBadge s={adv.status} /></td>
                     <td>
                       {adv.status === "granted" && (
                         <div style={{ display: "flex", gap: 4 }}>
@@ -511,13 +513,13 @@ export function DeconturiPage() {
                             className="btn btn-sm btn-outline"
                             onClick={() => setReturningId(adv.id)}
                           >
-                            Restituie
+                            {t("deconturi.advances.return")}
                           </button>
                           <button
                             className="btn btn-sm btn-danger-outline"
                             onClick={() => deleteAdvance.mutate(adv.id)}
                           >
-                            Șterge
+                            {t("deconturi.advances.delete")}
                           </button>
                         </div>
                       )}
@@ -531,9 +533,9 @@ export function DeconturiPage() {
           {/* Return inline form */}
           {returningId && (
             <div className="inline-form">
-              <h4>Restituire avans</h4>
+              <h4>{t("deconturi.advances.returnForm.title")}</h4>
               <div className="field">
-                <label>Data restituire</label>
+                <label>{t("deconturi.advances.returnForm.date")}</label>
                 <input
                   className="input"
                   type="date"
@@ -543,14 +545,14 @@ export function DeconturiPage() {
               </div>
               <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.5rem", marginTop: "0.75rem" }}>
                 <button className="btn btn-outline" onClick={() => setReturningId(null)}>
-                  Anulează
+                  {t("deconturi.advances.returnForm.cancel")}
                 </button>
                 <button
                   className="btn-dark"
                   disabled={returnAdvance.isPending}
                   onClick={() => returnAdvance.mutate(returningId)}
                 >
-                  {returnAdvance.isPending ? "Se procesează..." : "Confirmă restituire"}
+                  {returnAdvance.isPending ? t("deconturi.advances.returnForm.processing") : t("deconturi.advances.returnForm.confirm")}
                 </button>
               </div>
             </div>
@@ -564,26 +566,26 @@ export function DeconturiPage() {
           {/* ── Create form card ── */}
           <div className="scr-card" style={{ marginBottom: 16 }}>
             <div className="scr-toolbar">
-              <div className="tt">Decont nou</div>
+              <div className="tt">{t("deconturi.reportForm.title")}</div>
             </div>
             <div className="fgrid-form">
               <div className="field">
-                <label>Angajat (opțional)</label>
+                <label>{t("deconturi.reportForm.employee")}</label>
                 <input
                   className="input"
                   value={rEmployee}
                   onChange={(e) => setREmployee(e.target.value)}
-                  placeholder="Nume angajat"
+                  placeholder={t("deconturi.reportForm.employeePh")}
                 />
               </div>
               <div className="field">
-                <label>Avans legat (opțional)</label>
+                <label>{t("deconturi.reportForm.advance")}</label>
                 <select
                   className="select"
                   value={rAdvanceId}
                   onChange={(e) => setRAdvanceId(e.target.value)}
                 >
-                  <option value="">— fără avans —</option>
+                  <option value="">{t("deconturi.reportForm.noAdvance")}</option>
                   {grantedAdvances.map((a) => (
                     <option key={a.id} value={a.id}>
                       {fmtDate(a.grantedDate)} · {fmtRON(a.amount)} · {a.employeeId ?? "—"}
@@ -592,16 +594,16 @@ export function DeconturiPage() {
                 </select>
               </div>
               <div className="field">
-                <label>Destinație</label>
+                <label>{t("deconturi.reportForm.destination")}</label>
                 <input
                   className="input"
                   value={rDest}
                   onChange={(e) => setRDest(e.target.value)}
-                  placeholder="ex. București"
+                  placeholder={t("deconturi.reportForm.destinationPh")}
                 />
               </div>
               <div className="field">
-                <label>De la</label>
+                <label>{t("deconturi.reportForm.from")}</label>
                 <input
                   className="input"
                   type="date"
@@ -610,7 +612,7 @@ export function DeconturiPage() {
                 />
               </div>
               <div className="field">
-                <label>Până la</label>
+                <label>{t("deconturi.reportForm.to")}</label>
                 <input
                   className="input"
                   type="date"
@@ -619,7 +621,7 @@ export function DeconturiPage() {
                 />
               </div>
               <div className="field">
-                <label>Zile delegare</label>
+                <label>{t("deconturi.reportForm.days")}</label>
                 <input
                   className="input"
                   type="number"
@@ -630,7 +632,7 @@ export function DeconturiPage() {
                 />
               </div>
               <div className="field">
-                <label>Diurnă acordată (RON)</label>
+                <label>{t("deconturi.reportForm.diurna")}</label>
                 <input
                   className="input num"
                   type="number"
@@ -642,7 +644,7 @@ export function DeconturiPage() {
                 />
               </div>
               <div className="field">
-                <label>Salariu brut bază (RON) — plafonul B</label>
+                <label>{t("deconturi.reportForm.salary")}</label>
                 <input
                   className="input num"
                   type="number"
@@ -654,7 +656,7 @@ export function DeconturiPage() {
                 />
               </div>
               <div className="field">
-                <label>Data decont</label>
+                <label>{t("deconturi.reportForm.reportDate")}</label>
                 <input
                   className="input"
                   type="date"
@@ -663,12 +665,12 @@ export function DeconturiPage() {
                 />
               </div>
               <div className="field">
-                <label>Note</label>
+                <label>{t("deconturi.reportForm.notes")}</label>
                 <input
                   className="input"
                   value={rNotes}
                   onChange={(e) => setRNotes(e.target.value)}
-                  placeholder="Opțional"
+                  placeholder={t("deconturi.reportForm.notesPh")}
                 />
               </div>
             </div>
@@ -680,7 +682,7 @@ export function DeconturiPage() {
                   onClick={triggerDiurnaCalc}
                   type="button"
                 >
-                  Calculează plafon diurnă
+                  {t("deconturi.reportForm.computeCap")}
                 </button>
               </div>
             )}
@@ -692,15 +694,15 @@ export function DeconturiPage() {
 
             {/* Expense lines */}
             <div style={{ padding: "0 16px 8px" }}>
-              <div style={{ fontSize: 13, fontWeight: 600, padding: "4px 0 8px" }}>Linii cheltuieli</div>
+              <div style={{ fontSize: 13, fontWeight: 600, padding: "4px 0 8px" }}>{t("deconturi.reportForm.linesTitle")}</div>
               <table className="scr-table">
                 <thead>
                   <tr>
-                    <th>Categorie</th>
-                    <th>Descriere</th>
-                    <th className="r" style={{ width: 120 }}>Sumă (RON)</th>
-                    <th className="r" style={{ width: 100 }}>TVA ded.</th>
-                    <th style={{ width: 100 }}>Cont</th>
+                    <th>{t("deconturi.reportForm.lines.category")}</th>
+                    <th>{t("deconturi.reportForm.lines.description")}</th>
+                    <th className="r" style={{ width: 120 }}>{t("deconturi.reportForm.lines.amount")}</th>
+                    <th className="r" style={{ width: 100 }}>{t("deconturi.reportForm.lines.vat")}</th>
+                    <th style={{ width: 100 }}>{t("deconturi.reportForm.lines.account")}</th>
                     <th style={{ width: 40 }}></th>
                   </tr>
                 </thead>
@@ -713,8 +715,8 @@ export function DeconturiPage() {
                           value={line.category}
                           onChange={(e) => updateLine(i, { category: e.target.value as LineForm["category"] })}
                         >
-                          {CATEGORIES.map((c) => (
-                            <option key={c.value} value={c.value}>{c.label}</option>
+                          {CATEGORY_VALUES.map((c) => (
+                            <option key={c} value={c}>{t(`deconturi.categories.${c}`)}</option>
                           ))}
                         </select>
                       </td>
@@ -723,7 +725,7 @@ export function DeconturiPage() {
                           className="input"
                           value={line.description}
                           onChange={(e) => updateLine(i, { description: e.target.value })}
-                          placeholder="Descriere"
+                          placeholder={t("deconturi.reportForm.lines.descriptionPh")}
                         />
                       </td>
                       <td>
@@ -755,7 +757,7 @@ export function DeconturiPage() {
                           className="input"
                           value={line.accountCode}
                           onChange={(e) => updateLine(i, { accountCode: e.target.value })}
-                          placeholder="auto"
+                          placeholder={t("deconturi.reportForm.lines.accountPh")}
                         />
                       </td>
                       <td>
@@ -773,7 +775,7 @@ export function DeconturiPage() {
                 </tbody>
               </table>
               <button className="btn btn-sm btn-outline" onClick={addLine} type="button" style={{ marginTop: 8 }}>
-                + Linie nouă
+                {t("deconturi.reportForm.lines.add")}
               </button>
             </div>
 
@@ -784,7 +786,7 @@ export function DeconturiPage() {
                 onClick={() => createReport.mutate()}
               >
                 <Ic name="banknotes" />
-                {createReport.isPending ? "Se creează..." : "Salvează decont (ciornă)"}
+                {createReport.isPending ? t("deconturi.reportForm.creating") : t("deconturi.reportForm.submit")}
               </button>
             </div>
           </div>
@@ -792,16 +794,16 @@ export function DeconturiPage() {
           {/* ── Deconturi list card ── */}
           <div className="scr-card">
             <div className="scr-toolbar">
-              <div className="tt">Deconturi de cheltuieli</div>
+              <div className="tt">{t("deconturi.reports.listTitle")}</div>
             </div>
             <table className="scr-table">
               <thead>
                 <tr>
-                  <th style={{ width: 130 }}>Data</th>
-                  <th>Angajat</th>
-                  <th>Destinație</th>
-                  <th className="r" style={{ width: 130 }}>Diurnă</th>
-                  <th style={{ width: 120 }}>Status</th>
+                  <th style={{ width: 130 }}>{t("deconturi.reports.table.date")}</th>
+                  <th>{t("deconturi.reports.table.employee")}</th>
+                  <th>{t("deconturi.reports.table.destination")}</th>
+                  <th className="r" style={{ width: 130 }}>{t("deconturi.reports.table.diurna")}</th>
+                  <th style={{ width: 120 }}>{t("deconturi.reports.table.status")}</th>
                   <th style={{ width: 140 }}></th>
                 </tr>
               </thead>
@@ -811,8 +813,8 @@ export function DeconturiPage() {
                     <td colSpan={6} style={{ padding: 0 }}>
                       <div className="empty">
                         <div className="ei"><Ic name="banknotes" /></div>
-                        <b>Niciun decont înregistrat.</b>
-                        Completati formularul de mai sus pentru a crea un decont.
+                        <b>{t("deconturi.reports.empty.title")}</b>
+                        {t("deconturi.reports.empty.hint")}
                       </div>
                     </td>
                   </tr>
@@ -832,10 +834,10 @@ export function DeconturiPage() {
                       <td className="r">
                         {r.diurnaAcordata ? fmtRON(r.diurnaAcordata) : "—"}
                         {r.diurnaImpozabila && parseFloat(r.diurnaImpozabila) > 0 && (
-                          <span className="badge badge--red ml-1" title="Surplus impozabil">!</span>
+                          <span className="badge badge--red ml-1" title={t("deconturi.reports.taxableExcess")}>!</span>
                         )}
                       </td>
-                      <td>{statusBadge(r.status)}</td>
+                      <td><StatusBadge s={r.status} /></td>
                       <td onClick={(e) => e.stopPropagation()}>
                         {r.status === "draft" && (
                           <div style={{ display: "flex", gap: 4 }}>
@@ -843,13 +845,13 @@ export function DeconturiPage() {
                               className="btn btn-sm btn-primary"
                               onClick={() => setApprovingId(r.id)}
                             >
-                              Aprobă
+                              {t("deconturi.reports.approve")}
                             </button>
                             <button
                               className="btn btn-sm btn-danger-outline"
                               onClick={() => deleteReport.mutate(r.id)}
                             >
-                              Șterge
+                              {t("deconturi.reports.delete")}
                             </button>
                           </div>
                         )}
@@ -863,9 +865,9 @@ export function DeconturiPage() {
             {/* Approve inline form */}
             {approvingId && (
               <div className="inline-form">
-                <h4>Aprobare decont</h4>
+                <h4>{t("deconturi.reports.approveForm.title")}</h4>
                 <div className="field">
-                  <label>Data aprobare</label>
+                  <label>{t("deconturi.reports.approveForm.date")}</label>
                   <input
                     className="input"
                     type="date"
@@ -875,14 +877,14 @@ export function DeconturiPage() {
                 </div>
                 <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.5rem", marginTop: "0.75rem" }}>
                   <button className="btn btn-outline" onClick={() => setApprovingId(null)}>
-                    Anulează
+                    {t("deconturi.reports.approveForm.cancel")}
                   </button>
                   <button
                     className="btn-dark"
                     disabled={approveReport.isPending}
                     onClick={() => approveReport.mutate(approvingId)}
                   >
-                    {approveReport.isPending ? "Se procesează..." : "Confirmă aprobare + GL"}
+                    {approveReport.isPending ? t("deconturi.reports.approveForm.processing") : t("deconturi.reports.approveForm.confirm")}
                   </button>
                 </div>
               </div>
@@ -893,15 +895,19 @@ export function DeconturiPage() {
               <div className="decont-detail">
                 <div className="decont-detail-header">
                   <h4>
-                    Decont: {selectedReport.report.destination ?? "—"} ·{" "}
-                    {fmtDate(selectedReport.report.reportDate)}{" "}
-                    {statusBadge(selectedReport.report.status)}
+                    {t("deconturi.reports.detail.title", {
+                      destination: selectedReport.report.destination ?? "—",
+                      date: fmtDate(selectedReport.report.reportDate),
+                    })}{" "}
+                    <StatusBadge s={selectedReport.report.status} />
                   </h4>
                   {selectedReport.report.delegationFrom && (
                     <div className="decont-detail-meta">
-                      Delegare: {fmtDate(selectedReport.report.delegationFrom)} –{" "}
-                      {fmtDate(selectedReport.report.delegationTo)} ·{" "}
-                      {selectedReport.report.days} zile
+                      {t("deconturi.reports.detail.delegation", {
+                        from: fmtDate(selectedReport.report.delegationFrom),
+                        to: fmtDate(selectedReport.report.delegationTo),
+                        days: selectedReport.report.days,
+                      })}
                     </div>
                   )}
                 </div>
@@ -912,21 +918,21 @@ export function DeconturiPage() {
 
                 {selectedReport.lines.length > 0 && (
                   <div className="decont-lines">
-                    <h5>Linii cheltuieli</h5>
+                    <h5>{t("deconturi.reports.detail.linesTitle")}</h5>
                     <table className="scr-table">
                       <thead>
                         <tr>
-                          <th>Categorie</th>
-                          <th>Descriere</th>
-                          <th className="r">Sumă</th>
-                          <th className="r">TVA ded.</th>
-                          <th>Cont</th>
+                          <th>{t("deconturi.reports.detail.lines.category")}</th>
+                          <th>{t("deconturi.reports.detail.lines.description")}</th>
+                          <th className="r">{t("deconturi.reports.detail.lines.amount")}</th>
+                          <th className="r">{t("deconturi.reports.detail.lines.vat")}</th>
+                          <th>{t("deconturi.reports.detail.lines.account")}</th>
                         </tr>
                       </thead>
                       <tbody>
                         {selectedReport.lines.map((l) => (
                           <tr key={l.id}>
-                            <td>{CATEGORIES.find((c) => c.value === l.category)?.label ?? l.category}</td>
+                            <td>{t(`deconturi.categories.${l.category}`, { defaultValue: l.category })}</td>
                             <td>{l.description ?? "—"}</td>
                             <td className="r">{fmtRON(l.amount)}</td>
                             <td className="r">{l.vatAmount ? fmtRON(l.vatAmount) : "—"}</td>
@@ -943,7 +949,7 @@ export function DeconturiPage() {
                   onClick={() => window.print()}
                   style={{ marginTop: "0.5rem" }}
                 >
-                  Tipărire decont
+                  {t("deconturi.reports.detail.print")}
                 </button>
               </div>
             )}

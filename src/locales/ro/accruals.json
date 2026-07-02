@@ -1,0 +1,58 @@
+{
+  "accruals": {
+    "title": "Cheltuieli / venituri în avans",
+    "sub": "{{count}} înregistrări",
+    "selectCompany": "Selectați o companie.",
+    "loading": "Se încarcă…",
+    "errorLabel": "accrual-urile",
+    "recognizeMonth": "Recunoaște luna",
+    "add": "Adaugă",
+    "table": {
+      "kind": "TIP",
+      "description": "DESCRIERE",
+      "account": "CONT",
+      "total": "TOTAL",
+      "start": "START",
+      "months": "LUNI"
+    },
+    "empty": {
+      "title": "Nicio cheltuială/venit în avans.",
+      "hint": "Înregistrați o sumă plătită/încasată în avans pentru a o eșalona pe luni."
+    },
+    "kind": {
+      "prepaid": "Cheltuială",
+      "deferred": "Venit"
+    },
+    "row": {
+      "delete": "Șterge"
+    },
+    "notify": {
+      "created": "Accrual înregistrat — constituirea a fost postată.",
+      "createError": "Eroare la înregistrarea accrual-ului.",
+      "deleted": "Accrual șters.",
+      "deleteError": "Eroare la ștergere.",
+      "runPosted": "Recunoaștere {{period}}: {{amount}} RON postați.",
+      "runNone": "Nicio tranșă activă în {{period}}.",
+      "runError": "Eroare la recunoaștere."
+    },
+    "modal": {
+      "title": "Cheltuială / venit în avans",
+      "subtitle": "Constituirea (471/472) se postează automat; recunoașterea se face lunar.",
+      "kind": "Tip",
+      "kindPrepaid": "Cheltuială în avans (471)",
+      "kindDeferred": "Venit în avans (472)",
+      "accountExpense": "Cont cheltuială (6xx)",
+      "accountIncome": "Cont venit (7xx)",
+      "accountPhExpense": "ex. 613",
+      "accountPhIncome": "ex. 706",
+      "description": "Descriere",
+      "descriptionPh": "ex. Asigurare RCA 12 luni",
+      "total": "Sumă totală (lei)",
+      "startMonth": "Lună de start",
+      "months": "Eșalonare (luni)",
+      "cancel": "Anulează",
+      "saving": "Se salvează…",
+      "save": "Înregistrează"
+    }
+  }
+}

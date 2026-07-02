@@ -1,0 +1,106 @@
+{
+  "fiscalReceipts": {
+    "title": "Bonuri fiscale / Raport Z",
+    "subOne": "{{count}} bon înregistrat · {{company}}",
+    "subMany": "{{count}} bonuri înregistrate · {{company}}",
+    "newReport": "Raport Z nou",
+    "selectCompany": "Selectați o companie activă pentru a vedea bonurile fiscale.",
+    "loading": "Se încarcă…",
+    "errorLabel": "bonurile fiscale",
+    "status": {
+      "draft": "Ciornă",
+      "posted": "Contabilizat",
+      "stornat": "Stornat"
+    },
+    "table": {
+      "date": "Data",
+      "total": "Total",
+      "vat21": "TVA 21%",
+      "vat11": "TVA 11%",
+      "vat9": "TVA 9%",
+      "cash": "Numerar",
+      "card": "Card",
+      "status": "Status"
+    },
+    "empty": {
+      "title": "Niciun Raport Z.",
+      "hint": "Apăsați „Raport Z nou”."
+    },
+    "row": {
+      "delete": "Șterge"
+    },
+    "confirm": {
+      "deleteMsg": "Ștergeți acest bon fiscal?",
+      "deleteTitle": "Confirmare",
+      "postMsg": "Contabilizați acest bon? Se vor genera înregistrări GL.",
+      "postTitle": "Confirmare postare",
+      "stornoMsg": "Stornați bonul? Înregistrările GL vor fi șterse.",
+      "stornoTitle": "Confirmare storno"
+    },
+    "notify": {
+      "updated": "Bon actualizat.",
+      "created": "Bon creat.",
+      "saveError": "Eroare la salvare bon.",
+      "vatSaved": "Linii TVA salvate.",
+      "vatSaveError": "Eroare la salvare linii TVA.",
+      "linkAddError": "Eroare la adăugare legătură.",
+      "linkRemoveError": "Eroare la eliminare legătură.",
+      "posted": "Bon contabilizat în GL.",
+      "stornoDone": "Bon stornat — jurnalul GL a fost șters.",
+      "statusUpdated": "Status actualizat.",
+      "statusError": "Eroare la schimbarea statusului.",
+      "deleted": "Bon șters.",
+      "deleteError": "Eroare la ștergere bon."
+    },
+    "form": {
+      "editTitle": "Editare Raport Z",
+      "newTitle": "Raport Z nou",
+      "close": "Închide",
+      "serie": "Serie casă",
+      "nrZ": "Nr. Z",
+      "reportDate": "Data raportului",
+      "nrBonuri": "Nr. bonuri",
+      "cash": "Numerar (RON)",
+      "card": "Card (RON)",
+      "vouchers": "Tichete (RON)",
+      "computedTotal": "Total Z (calculat)",
+      "notes": "Observații",
+      "cancel": "Anulare",
+      "saving": "Se salvează…",
+      "update": "Actualizează",
+      "create": "Creează bon"
+    },
+    "vat": {
+      "title": "Defalcare pe cote TVA",
+      "addRate": "Adaugă cotă",
+      "empty": "Nicio cotă TVA. Adăugați cel puțin una.",
+      "base": "Bază",
+      "vat": "TVA",
+      "sum": "Σ(bază+TVA) = {{sum}} RON",
+      "mismatch": "≠ Total Z ({{total}})",
+      "saving": "Se salvează…",
+      "save": "Salvează linii TVA"
+    },
+    "dedup": {
+      "title": "Facturi legate (de-dup)",
+      "directRevenue": "Venit direct din Z:",
+      "exceeds": "facturi depășesc totalul Z!",
+      "noInvoices": "Nicio factură emisă în data {{date}}.",
+      "cash": "Numerar",
+      "card": "Card"
+    },
+    "drawer": {
+      "loading": "Se încarcă…",
+      "title": "Raport Z {{nr}} / {{serie}}",
+      "edit": "Editează",
+      "print": "Print Raport Z",
+      "totalZ": "Total Z",
+      "cash": "Numerar",
+      "card": "Card",
+      "vouchers": "Tichete",
+      "nrBonuri": "Nr. bonuri",
+      "post": "Contabilizează (→ POSTED)",
+      "storno": "Stornare (→ STORNAT)"
+    }
+  }
+}

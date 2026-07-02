@@ -100,15 +100,6 @@ export function InventoryRegisterPage() {
             <Ic name="printer" />
             Imprima / PDF
           </button>
-
-          <button
-            className="btn-dark"
-            onClick={() => {/* Element nou — handler reserved for future modal */}}
-            title={t("inventory.addEntry") as string}
-          >
-            <Ic name="plus" />
-            {t("inventory.addEntry") ?? "Element nou"}
-          </button>
         </div>
       </div>
 

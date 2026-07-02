@@ -1,0 +1,106 @@
+{
+  "fiscalReceipts": {
+    "title": "Fiscal receipts / Z report",
+    "subOne": "{{count}} report registered · {{company}}",
+    "subMany": "{{count}} reports registered · {{company}}",
+    "newReport": "New Z report",
+    "selectCompany": "Select an active company to see the fiscal receipts.",
+    "loading": "Loading…",
+    "errorLabel": "fiscal receipts",
+    "status": {
+      "draft": "Draft",
+      "posted": "Posted",
+      "stornat": "Reversed"
+    },
+    "table": {
+      "date": "Date",
+      "total": "Total",
+      "vat21": "VAT 21%",
+      "vat11": "VAT 11%",
+      "vat9": "VAT 9%",
+      "cash": "Cash",
+      "card": "Card",
+      "status": "Status"
+    },
+    "empty": {
+      "title": "No Z report.",
+      "hint": "Press \"New Z report\"."
+    },
+    "row": {
+      "delete": "Delete"
+    },
+    "confirm": {
+      "deleteMsg": "Delete this fiscal receipt?",
+      "deleteTitle": "Confirmation",
+      "postMsg": "Post this receipt? GL entries will be generated.",
+      "postTitle": "Confirm posting",
+      "stornoMsg": "Reverse the receipt? The GL entries will be deleted.",
+      "stornoTitle": "Confirm reversal"
+    },
+    "notify": {
+      "updated": "Receipt updated.",
+      "created": "Receipt created.",
+      "saveError": "Error while saving the receipt.",
+      "vatSaved": "VAT lines saved.",
+      "vatSaveError": "Error while saving the VAT lines.",
+      "linkAddError": "Error while adding the link.",
+      "linkRemoveError": "Error while removing the link.",
+      "posted": "Receipt posted to the GL.",
+      "stornoDone": "Receipt reversed — the GL journal was deleted.",
+      "statusUpdated": "Status updated.",
+      "statusError": "Error while changing the status.",
+      "deleted": "Receipt deleted.",
+      "deleteError": "Error while deleting the receipt."
+    },
+    "form": {
+      "editTitle": "Edit Z report",
+      "newTitle": "New Z report",
+      "close": "Close",
+      "serie": "Register series",
+      "nrZ": "Z no.",
+      "reportDate": "Report date",
+      "nrBonuri": "No. of receipts",
+      "cash": "Cash (RON)",
+      "card": "Card (RON)",
+      "vouchers": "Vouchers (RON)",
+      "computedTotal": "Z total (computed)",
+      "notes": "Notes",
+      "cancel": "Cancel",
+      "saving": "Saving…",
+      "update": "Update",
+      "create": "Create receipt"
+    },
+    "vat": {
+      "title": "Breakdown by VAT rate",
+      "addRate": "Add rate",
+      "empty": "No VAT rate. Add at least one.",
+      "base": "Base",
+      "vat": "VAT",
+      "sum": "Σ(base+VAT) = {{sum}} RON",
+      "mismatch": "≠ Z total ({{total}})",
+      "saving": "Saving…",
+      "save": "Save VAT lines"
+    },
+    "dedup": {
+      "title": "Linked invoices (de-dup)",
+      "directRevenue": "Direct revenue from Z:",
+      "exceeds": "invoices exceed the Z total!",
+      "noInvoices": "No invoice issued on {{date}}.",
+      "cash": "Cash",
+      "card": "Card"
+    },
+    "drawer": {
+      "loading": "Loading…",
+      "title": "Z report {{nr}} / {{serie}}",
+      "edit": "Edit",
+      "print": "Print Z report",
+      "totalZ": "Z total",
+      "cash": "Cash",
+      "card": "Card",
+      "vouchers": "Vouchers",
+      "nrBonuri": "No. of receipts",
+      "post": "Post (→ POSTED)",
+      "storno": "Reverse (→ STORNAT)"
+    }
+  }
+}

@@ -17,6 +17,7 @@ import { XmlDocView } from "@/components/shared/XmlDocView";
 import { xmlToTables } from "@/lib/xml-to-tables";
 import { useXmlViewerStore, type XmlViewerPayload } from "@/lib/xml-viewer-store";
 import { useAnimatedClose } from "@/hooks/use-animated-close";
+import { useModalFocus } from "@/hooks/use-modal-focus";
 import { api, type XmlDukValidation } from "@/lib/tauri";
 import { isDemoMode } from "@/lib/demo";
 import { notify } from "@/lib/toasts";
@@ -26,6 +27,7 @@ export function XmlViewerModal() {
   const payload = useXmlViewerStore((s) => s.payload);
   const storeClose = useXmlViewerStore((s) => s.close);
   const { closing, close } = useAnimatedClose(storeClose);
+  const dialogRef = useModalFocus<HTMLDivElement>(!!payload);
 
   useEffect(() => {
     if (!payload) return;
@@ -45,7 +47,14 @@ export function XmlViewerModal() {
         if (e.target === e.currentTarget) close();
       }}
     >
-      <div className="modal xmlv" role="dialog" aria-modal="true" aria-label={payload.name}>
+      <div
+        ref={dialogRef}
+        tabIndex={-1}
+        className="modal xmlv"
+        role="dialog"
+        aria-modal="true"
+        aria-label={payload.name}
+      >
         <XmlViewerBody payload={payload} onClose={close} />
       </div>
     </div>,

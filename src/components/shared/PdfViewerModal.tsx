@@ -40,6 +40,7 @@ import { SearchLayer, SearchPluginPackage, useSearch } from "@embedpdf/plugin-se
 import pdfiumWasmUrl from "@embedpdf/pdfium/pdfium.wasm?url";
 
 import { Ic } from "@/components/shared/Ic";
+import { useModalFocus } from "@/hooks/use-modal-focus";
 import { usePdfViewerStore, type PdfViewerPayload } from "@/lib/pdf-viewer-store";
 import { isDemoMode } from "@/lib/demo";
 import { notify } from "@/lib/toasts";
@@ -60,6 +61,7 @@ const ZOOM_PRESETS = [50, 75, 100, 125, 150, 200];
 export function PdfViewerModal() {
   const payload = usePdfViewerStore((s) => s.payload);
   const close = usePdfViewerStore((s) => s.close);
+  const dialogRef = useModalFocus<HTMLDivElement>(!!payload);
 
   useEffect(() => {
     if (!payload) return;
@@ -75,6 +77,8 @@ export function PdfViewerModal() {
   return createPortal(
     <div className="modal-back show" onMouseDown={close}>
       <div
+        ref={dialogRef}
+        tabIndex={-1}
         className="modal pdfv"
         role="dialog"
         aria-modal="true"

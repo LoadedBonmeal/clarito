@@ -120,7 +120,26 @@
     },
     "periodLocks": {
       "title": "Perioade fiscale blocate",
-      "desc": "Perioadele blocate automat la exportul declarațiilor sau manual de contabil. Deblocați o perioadă doar dacă depuneți o declarație rectificativă — deblocarea permite re-generarea notelor GL și modificarea documentelor din perioadă."
+      "desc": "Perioadele blocate automat la exportul declarațiilor sau manual de contabil. Deblocați o perioadă doar dacă depuneți o declarație rectificativă — deblocarea permite re-generarea notelor GL și modificarea documentelor din perioadă.",
+      "loading": "Se încarcă…",
+      "empty": "Nicio perioadă blocată.",
+      "loadError": "Eroare la încărcarea perioadelor blocate.",
+      "table": {
+        "period": "Perioadă",
+        "source": "Sursă",
+        "lockedAt": "Data blocării",
+        "actions": "Acțiuni"
+      },
+      "source": {
+        "declaration": "Declarație {{code}}",
+        "manual": "Manual (contabil)"
+      },
+      "unlock": "Deblochează",
+      "unlocking": "Se deblochează…",
+      "confirmTitle": "Deblocare perioadă",
+      "confirmMsg": "Deblocați perioada {{period}}?\n\nAceastă acțiune permite re-generarea notelor GL și modificarea facturilor din această perioadă. Procedați doar dacă depuneți o declarație rectificativă.",
+      "unlocked": "Perioada {{period}} a fost deblocată.",
+      "unlockError": "Eroare la deblocarea perioadei {{period}}."
     },
     "backup": {
       "title": "Backup & restaurare",

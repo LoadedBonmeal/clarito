@@ -2,7 +2,9 @@
   "shared": {
     "common": {
       "close": "Închide",
-      "cancel": "Anulează"
+      "cancel": "Anulează",
+      "loading": "Se încarcă…",
+      "authLoadError": "Nu s-a putut verifica sesiunea. Reporniți aplicația."
     },
     "pdfViewer": {
       "loading": "Se încarcă documentul…",

@@ -1,0 +1,66 @@
+{
+  "provisions": {
+    "title": "Provizioane",
+    "sub": "{{count}} provizioane · clasa 15x",
+    "selectCompany": "Selectați o companie.",
+    "loading": "Se încarcă…",
+    "errorLabel": "provizioanele",
+    "periodTitle": "Luna pentru reluare",
+    "create": "Constituie",
+    "table": {
+      "account": "CONT",
+      "description": "DESCRIERE",
+      "amount": "SUMĂ",
+      "deductible": "DEDUCT.",
+      "status": "STATUS"
+    },
+    "empty": {
+      "title": "Niciun provizion.",
+      "hint": "Constituiți un provizion când cele 3 condiții (OMFP 1802 pct. 374) sunt îndeplinite cumulativ."
+    },
+    "chip": {
+      "deductible": "deductibil",
+      "nonDeductible": "nedeductibil",
+      "reversed": "reluat {{period}}",
+      "active": "activ"
+    },
+    "row": {
+      "reverseIn": "Reluare în {{period}}",
+      "delete": "Șterge"
+    },
+    "notify": {
+      "created": "Provizion constituit (D 6812 / C 15x).",
+      "createError": "Eroare la constituire.",
+      "reversed": "Provizion reluat (D 15x / C 7812).",
+      "reverseError": "Eroare la reluare.",
+      "deleted": "Provizion șters.",
+      "deleteError": "Eroare la ștergere."
+    },
+    "accounts": {
+      "1511": "Litigii",
+      "1512": "Garanții acordate clienților",
+      "1513": "Dezafectare imobilizări",
+      "1514": "Restructurare",
+      "1515": "Pensii și obligații similare",
+      "1518": "Alte provizioane"
+    },
+    "modal": {
+      "title": "Constituire provizion",
+      "subtitle": "Se postează D 6812 / C 15x. Cele 3 condiții (pct. 374) sunt obligatorii.",
+      "account": "Cont provizion",
+      "amount": "Sumă (lei)",
+      "description": "Descriere",
+      "descriptionPh": "ex. Litigiu comercial X",
+      "probability": "Probabilitate",
+      "createdMonth": "Luna constituirii",
+      "deductibleLabel": "Deductibil fiscal (Cod fiscal art. 26 — de regulă NU)",
+      "conditionsTitle": "Condiții cumulative de recunoaștere (OMFP 1802 pct. 374):",
+      "c1": "Obligație actuală dintr-un eveniment trecut",
+      "c2": "Ieșire probabilă de resurse",
+      "c3": "Estimare credibilă a valorii",
+      "cancel": "Anulează",
+      "posting": "Se postează…",
+      "submit": "Constituie"
+    }
+  }
+}

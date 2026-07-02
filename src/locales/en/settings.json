@@ -120,7 +120,26 @@
     },
     "periodLocks": {
       "title": "Locked fiscal periods",
-      "desc": "Periods locked automatically when declarations are exported, or manually by the accountant. Unlock a period only when filing a rectifying declaration — unlocking allows GL entries to be regenerated and documents in the period to be modified."
+      "desc": "Periods locked automatically when declarations are exported, or manually by the accountant. Unlock a period only when filing a rectifying declaration — unlocking allows GL entries to be regenerated and documents in the period to be modified.",
+      "loading": "Loading…",
+      "empty": "No locked period.",
+      "loadError": "Error while loading the locked periods.",
+      "table": {
+        "period": "Period",
+        "source": "Source",
+        "lockedAt": "Locked on",
+        "actions": "Actions"
+      },
+      "source": {
+        "declaration": "Declaration {{code}}",
+        "manual": "Manual (accountant)"
+      },
+      "unlock": "Unlock",
+      "unlocking": "Unlocking…",
+      "confirmTitle": "Unlock period",
+      "confirmMsg": "Unlock the period {{period}}?\n\nThis action allows GL entries to be regenerated and invoices in this period to be modified. Proceed only if you are filing a rectifying declaration.",
+      "unlocked": "Period {{period}} was unlocked.",
+      "unlockError": "Error while unlocking the period {{period}}."
     },
     "backup": {
       "title": "Backup & restore",

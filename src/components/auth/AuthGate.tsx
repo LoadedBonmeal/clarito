@@ -62,7 +62,7 @@ export function AuthGate({ children }: AuthGateProps) {
         }}
       >
         <span style={{ color: "var(--rf-text-dim)", fontSize: 14 }}>
-          {t("common.loading", "Se încarcă…")}
+          {t("shared.common.loading")}
         </span>
       </div>
     );
@@ -86,7 +86,7 @@ export function AuthGate({ children }: AuthGateProps) {
           textAlign: "center",
         }}
       >
-        {t("common.authLoadError", "Nu s-a putut verifica sesiunea. Reporniți aplicația.")}
+        {t("shared.common.authLoadError")}
       </div>
     );
   }

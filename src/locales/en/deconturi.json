@@ -1,0 +1,162 @@
+{
+  "deconturi": {
+    "title": "Expense reports & treasury advances",
+    "sub": "Advances granted to employees and expense reports · {{company}}",
+    "selectCompany": "Select a company to manage expense reports.",
+    "selectCompanyErr": "Select a company",
+    "status": {
+      "granted": "Granted",
+      "settled": "Settled",
+      "returned": "Returned",
+      "draft": "Draft",
+      "approved": "Approved"
+    },
+    "categories": {
+      "diurna": "Per diem",
+      "transport": "Transport",
+      "cazare": "Accommodation",
+      "combustibil": "Fuel",
+      "alte": "Other expenses"
+    },
+    "diurna": {
+      "granted": "Per diem granted",
+      "nonTaxable": "Non-taxable",
+      "taxable": "Taxable",
+      "capALabel": "Cap A (2.5×23 RON):",
+      "capBLabel": "Cap B (salary×3/{{days}} working days):",
+      "capAppliedLabel": "Applied cap:",
+      "perDay": "{{value}}/day",
+      "warnTitle": "Attention:",
+      "warnBody": "The taxable excess of {{amount}} must be reported on the payroll (included in the CAS/CASS/income-tax base). It is NOT posted automatically to the GL."
+    },
+    "tabs": {
+      "advances": "Treasury advances",
+      "reports": "Expense reports"
+    },
+    "grantForm": {
+      "title": "Grant advance",
+      "employee": "Employee",
+      "employeePh": "Select employee…",
+      "amount": "Amount (RON)",
+      "amountPh": "0.00",
+      "date": "Date",
+      "purpose": "Purpose",
+      "purposePh": "e.g. business trip, purchases",
+      "method": "Payment method",
+      "methodCash": "Cash (5311)",
+      "methodBank": "Bank transfer (5121)",
+      "processing": "Processing...",
+      "submit": "Grant advance"
+    },
+    "advances": {
+      "listTitle": "Granted advances",
+      "table": {
+        "date": "Date",
+        "employee": "Employee",
+        "purpose": "Purpose",
+        "amount": "Amount granted",
+        "balance": "Balance to settle",
+        "status": "Status"
+      },
+      "empty": {
+        "title": "No advance granted.",
+        "hint": "Fill in the form above to grant an advance."
+      },
+      "return": "Return",
+      "delete": "Delete",
+      "returnForm": {
+        "title": "Return advance",
+        "date": "Return date",
+        "cancel": "Cancel",
+        "processing": "Processing...",
+        "confirm": "Confirm return"
+      },
+      "confirmDelete": "Permanently delete this advance?",
+      "notify": {
+        "granted": "Advance granted and posted to the GL (542).",
+        "grantError": "Error while granting the advance.",
+        "returned": "Advance returned. GL entry (5311/542) posted.",
+        "returnError": "Error while returning.",
+        "deleted": "Advance deleted.",
+        "deleteError": "Error while deleting."
+      }
+    },
+    "reportForm": {
+      "title": "New expense report",
+      "employee": "Employee (optional)",
+      "employeePh": "Employee name",
+      "advance": "Linked advance (optional)",
+      "noAdvance": "— no advance —",
+      "destination": "Destination",
+      "destinationPh": "e.g. Bucharest",
+      "from": "From",
+      "to": "Until",
+      "days": "Delegation days",
+      "diurna": "Per diem granted (RON)",
+      "salary": "Base gross salary (RON) — cap B",
+      "reportDate": "Report date",
+      "notes": "Notes",
+      "notesPh": "Optional",
+      "computeCap": "Compute per-diem cap",
+      "linesTitle": "Expense lines",
+      "lines": {
+        "category": "Category",
+        "description": "Description",
+        "descriptionPh": "Description",
+        "amount": "Amount (RON)",
+        "vat": "VAT ded.",
+        "account": "Account",
+        "accountPh": "auto",
+        "add": "+ New line"
+      },
+      "creating": "Creating...",
+      "submit": "Save report (draft)"
+    },
+    "reports": {
+      "listTitle": "Expense reports",
+      "table": {
+        "date": "Date",
+        "employee": "Employee",
+        "destination": "Destination",
+        "diurna": "Per diem",
+        "status": "Status"
+      },
+      "empty": {
+        "title": "No expense report registered.",
+        "hint": "Fill in the form above to create an expense report."
+      },
+      "taxableExcess": "Taxable excess",
+      "approve": "Approve",
+      "delete": "Delete",
+      "approveForm": {
+        "title": "Approve expense report",
+        "date": "Approval date",
+        "cancel": "Cancel",
+        "processing": "Processing...",
+        "confirm": "Confirm approval + GL"
+      },
+      "confirmDelete": "Permanently delete this expense report?",
+      "notify": {
+        "created": "Expense report created (draft).",
+        "createError": "Error while creating the expense report.",
+        "approved": "Expense report approved. GL entry posted.",
+        "approveError": "Error while approving.",
+        "deleted": "Expense report deleted.",
+        "deleteError": "Error while deleting."
+      },
+      "detail": {
+        "title": "Report: {{destination}} · {{date}}",
+        "delegation": "Delegation: {{from}} – {{to}} · {{days}} days",
+        "linesTitle": "Expense lines",
+        "lines": {
+          "category": "Category",
+          "description": "Description",
+          "amount": "Amount",
+          "vat": "VAT ded.",
+          "account": "Account"
+        },
+        "print": "Print report"
+      }
+    }
+  }
+}

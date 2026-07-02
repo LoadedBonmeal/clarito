@@ -13,6 +13,7 @@
 import { useState, useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { confirm } from "@tauri-apps/plugin-dialog";
+import { useTranslation } from "react-i18next";
 
 import { Ic } from "@/components/shared/Ic";
 import { QueryErrorBanner } from "@/components/shared/QueryErrorBanner";
@@ -43,10 +44,11 @@ const fmtRoDate = (iso: string) => {
   return `${d} ${RO_MON[Number(m) - 1] ?? m} ${y}`;
 };
 
-const STATUS_LABEL: Record<string, string> = {
-  DRAFT: "Ciornă",
-  POSTED: "Contabilizat",
-  STORNAT: "Stornat",
+/** Status → locale key (labels live in fiscalReceipts.status.*). */
+const STATUS_TKEY: Record<string, string> = {
+  DRAFT: "fiscalReceipts.status.draft",
+  POSTED: "fiscalReceipts.status.posted",
+  STORNAT: "fiscalReceipts.status.stornat",
 };
 
 const STATUS_CLASS: Record<string, string> = {
@@ -68,6 +70,8 @@ const emptyInput = (): FiscalReceiptInput => ({
 });
 
 // ─── Raport Z Printout (HG 479/2003 art.64(2)) ───────────────────────────────
+// NOTE: the printout is a Romanian fiscal document (HG 479/2003) — its wording stays
+// Romanian regardless of the UI language, like the invoice XML/PDF documents.
 
 function printRaportZ(detail: FiscalReceiptDetail, companyName: string) {
   const { receipt, vatLines } = detail;
@@ -135,6 +139,7 @@ interface ReceiptFormProps {
 }
 
 function ReceiptForm({ companyId, initial, onSuccess, onCancel }: ReceiptFormProps) {
+  const { t } = useTranslation();
   const queryClient = useQueryClient();
 
   const [form, setForm] = useState<FiscalReceiptInput>(
@@ -181,10 +186,10 @@ function ReceiptForm({ companyId, initial, onSuccess, onCancel }: ReceiptFormPro
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["fiscalReceipts", companyId] });
-      notify.success(initial ? "Bon actualizat." : "Bon creat.");
+      notify.success(initial ? t("fiscalReceipts.notify.updated") : t("fiscalReceipts.notify.created"));
       onSuccess();
     },
-    onError: (e) => notify.error(formatError(e, "Eroare la salvare bon.")),
+    onError: (e) => notify.error(formatError(e, t("fiscalReceipts.notify.saveError"))),
   });
 
   const f =
@@ -196,20 +201,20 @@ function ReceiptForm({ companyId, initial, onSuccess, onCancel }: ReceiptFormPro
     <>
       <div className="modal-head">
         <div>
-          <div className="mt">{initial ? "Editare Raport Z" : "Raport Z nou"}</div>
+          <div className="mt">{initial ? t("fiscalReceipts.form.editTitle") : t("fiscalReceipts.form.newTitle")}</div>
         </div>
-        <button className="modal-x" onClick={onCancel} aria-label="Inchide">
+        <button className="modal-x" onClick={onCancel} aria-label={t("fiscalReceipts.form.close")}>
           <Ic name="xMark" />
         </button>
       </div>
       <div className="modal-body">
         <div className="fgrid">
           <div className="field">
-            <label>Serie casă</label>
+            <label>{t("fiscalReceipts.form.serie")}</label>
             <input value={form.serieCasa} onChange={f("serieCasa")} className="input" />
           </div>
           <div className="field">
-            <label>Nr. Z</label>
+            <label>{t("fiscalReceipts.form.nrZ")}</label>
             <input
               type="number"
               min={1}
@@ -221,7 +226,7 @@ function ReceiptForm({ companyId, initial, onSuccess, onCancel }: ReceiptFormPro
             />
           </div>
           <div className="field">
-            <label>Data raportului</label>
+            <label>{t("fiscalReceipts.form.reportDate")}</label>
             <input
               type="date"
               value={form.reportDate}
@@ -230,7 +235,7 @@ function ReceiptForm({ companyId, initial, onSuccess, onCancel }: ReceiptFormPro
             />
           </div>
           <div className="field">
-            <label>Nr. bonuri</label>
+            <label>{t("fiscalReceipts.form.nrBonuri")}</label>
             <input
               type="number"
               min={0}
@@ -242,15 +247,15 @@ function ReceiptForm({ companyId, initial, onSuccess, onCancel }: ReceiptFormPro
             />
           </div>
           <div className="field">
-            <label>Numerar (RON)</label>
+            <label>{t("fiscalReceipts.form.cash")}</label>
             <input value={form.numerar} onChange={f("numerar")} className="input" />
           </div>
           <div className="field">
-            <label>Card (RON)</label>
+            <label>{t("fiscalReceipts.form.card")}</label>
             <input value={form.card} onChange={f("card")} className="input" />
           </div>
           <div className="field">
-            <label>Tichete (RON)</label>
+            <label>{t("fiscalReceipts.form.vouchers")}</label>
             <input
               value={form.tichete ?? "0.00"}
               onChange={f("tichete")}
@@ -258,7 +263,7 @@ function ReceiptForm({ companyId, initial, onSuccess, onCancel }: ReceiptFormPro
             />
           </div>
           <div className="field span2">
-            <label>Total Z (calculat)</label>
+            <label>{t("fiscalReceipts.form.computedTotal")}</label>
             <input
               value={computedTotal}
               readOnly
@@ -267,7 +272,7 @@ function ReceiptForm({ companyId, initial, onSuccess, onCancel }: ReceiptFormPro
             />
           </div>
           <div className="field span2">
-            <label>Observații</label>
+            <label>{t("fiscalReceipts.form.notes")}</label>
             <textarea
               value={form.notes ?? ""}
               onChange={f("notes")}
@@ -279,7 +284,7 @@ function ReceiptForm({ companyId, initial, onSuccess, onCancel }: ReceiptFormPro
       </div>
       <div className="modal-foot">
         <button type="button" className="pill-btn" onClick={onCancel}>
-          Anulare
+          {t("fiscalReceipts.form.cancel")}
         </button>
         <button
           className="btn-dark"
@@ -287,10 +292,10 @@ function ReceiptForm({ companyId, initial, onSuccess, onCancel }: ReceiptFormPro
           disabled={saveMutation.isPending}
         >
           {saveMutation.isPending
-            ? "Se salvează…"
+            ? t("fiscalReceipts.form.saving")
             : initial
-            ? "Actualizează"
-            : "Creează bon"}
+            ? t("fiscalReceipts.form.update")
+            : t("fiscalReceipts.form.create")}
         </button>
       </div>
     </>
@@ -306,6 +311,7 @@ interface VatLinesEditorProps {
 }
 
 function VatLinesEditor({ companyId, detail, onRefresh }: VatLinesEditorProps) {
+  const { t } = useTranslation();
   const queryClient = useQueryClient();
   const { data: vatRates = [] } = useQuery({
     queryKey: ["vatRates", "active"],
@@ -332,10 +338,10 @@ function VatLinesEditor({ companyId, detail, onRefresh }: VatLinesEditorProps) {
       api.fiscalReceipts.setVatLines(detail.receipt.id, companyId, lines),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["fiscalReceipts", companyId] });
-      notify.success("Linii TVA salvate.");
+      notify.success(t("fiscalReceipts.notify.vatSaved"));
       onRefresh();
     },
-    onError: (e) => notify.error(formatError(e, "Eroare la salvare linii TVA.")),
+    onError: (e) => notify.error(formatError(e, t("fiscalReceipts.notify.vatSaveError"))),
   });
 
   const addLine = () =>
@@ -360,15 +366,15 @@ function VatLinesEditor({ companyId, detail, onRefresh }: VatLinesEditorProps) {
   return (
     <div className="section-panel">
       <div className="section-head">
-        <span>Defalcare pe cote TVA</span>
+        <span>{t("fiscalReceipts.vat.title")}</span>
         {!isReadonly && (
-          <button className="sq-btn" onClick={addLine} title="Adaugă cotă">
+          <button className="sq-btn" onClick={addLine} title={t("fiscalReceipts.vat.addRate")}>
             <Ic name="plus" />
           </button>
         )}
       </div>
       {lines.length === 0 && (
-        <p className="empty-msg">Nicio cotă TVA. Adăugați cel puțin una.</p>
+        <p className="empty-msg">{t("fiscalReceipts.vat.empty")}</p>
       )}
       {lines.map((l, i) => (
         <div key={i} className="vat-line-row">
@@ -385,7 +391,7 @@ function VatLinesEditor({ companyId, detail, onRefresh }: VatLinesEditorProps) {
             ))}
           </select>
           <label className="inp-grp">
-            <span>Bază</span>
+            <span>{t("fiscalReceipts.vat.base")}</span>
             <input
               value={l.baza}
               onChange={(e) => updateLine(i, "baza", e.target.value)}
@@ -394,7 +400,7 @@ function VatLinesEditor({ companyId, detail, onRefresh }: VatLinesEditorProps) {
             />
           </label>
           <label className="inp-grp">
-            <span>TVA</span>
+            <span>{t("fiscalReceipts.vat.vat")}</span>
             <input
               value={l.tva}
               onChange={(e) => updateLine(i, "tva", e.target.value)}
@@ -420,8 +426,8 @@ function VatLinesEditor({ companyId, detail, onRefresh }: VatLinesEditorProps) {
               fontWeight: 600,
             }}
           >
-            Σ(bază+TVA) = {fmtRON(sumLines)} RON
-            {diff > 0.01 ? ` ≠ Total Z (${fmtRON(total)})` : " ✓"}
+            {t("fiscalReceipts.vat.sum", { sum: fmtRON(sumLines) })}
+            {diff > 0.01 ? ` ${t("fiscalReceipts.vat.mismatch", { total: fmtRON(total) })}` : " ✓"}
           </span>
         </div>
       )}
@@ -431,7 +437,7 @@ function VatLinesEditor({ companyId, detail, onRefresh }: VatLinesEditorProps) {
           onClick={() => saveMutation.mutate()}
           disabled={saveMutation.isPending || diff > 0.01}
         >
-          {saveMutation.isPending ? "Se salvează…" : "Salvează linii TVA"}
+          {saveMutation.isPending ? t("fiscalReceipts.vat.saving") : t("fiscalReceipts.vat.save")}
         </button>
       )}
     </div>
@@ -447,6 +453,7 @@ interface DedupPanelProps {
 }
 
 function DedupPanel({ companyId, detail, onRefresh }: DedupPanelProps) {
+  const { t } = useTranslation();
   const queryClient = useQueryClient();
   const isReadonly = detail.receipt.status !== "DRAFT";
 
@@ -473,7 +480,7 @@ function DedupPanel({ companyId, detail, onRefresh }: DedupPanelProps) {
       void queryClient.invalidateQueries({ queryKey: ["fiscalReceipts", companyId] });
       onRefresh();
     },
-    onError: (e) => notify.error(formatError(e, "Eroare la adăugare legătură.")),
+    onError: (e) => notify.error(formatError(e, t("fiscalReceipts.notify.linkAddError"))),
   });
 
   const removeMutation = useMutation({
@@ -483,7 +490,7 @@ function DedupPanel({ companyId, detail, onRefresh }: DedupPanelProps) {
       void queryClient.invalidateQueries({ queryKey: ["fiscalReceipts", companyId] });
       onRefresh();
     },
-    onError: (e) => notify.error(formatError(e, "Eroare la eliminare legătură.")),
+    onError: (e) => notify.error(formatError(e, t("fiscalReceipts.notify.linkRemoveError"))),
   });
 
   const [payMeans, setPayMeans] = useState<Record<string, "CASH" | "CARD">>({});
@@ -511,21 +518,21 @@ function DedupPanel({ companyId, detail, onRefresh }: DedupPanelProps) {
   return (
     <div className="section-panel">
       <div className="section-head">
-        <span>Facturi legate (de-dup)</span>
+        <span>{t("fiscalReceipts.dedup.title")}</span>
       </div>
       <div className="dedup-summary">
         <span>
-          Venit direct din Z:{" "}
+          {t("fiscalReceipts.dedup.directRevenue")}{" "}
           <strong style={{ color: remainder < 0 ? "var(--danger)" : undefined }}>
             {fmtRON(remainder)} RON
           </strong>
-          {remainder < 0 && " ⚠ facturi depășesc totalul Z!"}
+          {remainder < 0 && ` ⚠ ${t("fiscalReceipts.dedup.exceeds")}`}
         </span>
       </div>
 
       {dayInvoices.length === 0 && (
         <p className="empty-msg">
-          Nicio factură emisă în data {fmtRoDate(detail.receipt.reportDate)}.
+          {t("fiscalReceipts.dedup.noInvoices", { date: fmtRoDate(detail.receipt.reportDate) })}
         </p>
       )}
 
@@ -560,7 +567,7 @@ function DedupPanel({ companyId, detail, onRefresh }: DedupPanelProps) {
                       setPayMeans((p) => ({ ...p, [inv.id]: "CASH" }))
                     }
                   />
-                  Numerar
+                  {t("fiscalReceipts.dedup.cash")}
                 </label>
                 <label>
                   <input
@@ -572,7 +579,7 @@ function DedupPanel({ companyId, detail, onRefresh }: DedupPanelProps) {
                       setPayMeans((p) => ({ ...p, [inv.id]: "CARD" }))
                     }
                   />
-                  Card
+                  {t("fiscalReceipts.dedup.card")}
                 </label>
               </div>
             )}
@@ -598,6 +605,7 @@ interface DetailDrawerProps {
 }
 
 function DetailDrawer({ receiptId, companyId, onClose }: DetailDrawerProps) {
+  const { t } = useTranslation();
   const queryClient = useQueryClient();
   const { data: detail, isLoading, refetch } = useQuery({
     queryKey: ["fiscalReceipts", companyId, receiptId],
@@ -619,14 +627,14 @@ function DetailDrawer({ receiptId, companyId, onClose }: DetailDrawerProps) {
       void queryClient.invalidateQueries({ queryKey: ["fiscalReceipts", companyId] });
       notify.success(
         updated.status === "POSTED"
-          ? "Bon contabilizat în GL."
+          ? t("fiscalReceipts.notify.posted")
           : updated.status === "STORNAT"
-          ? "Bon stornat — jurnalul GL a fost șters."
-          : "Status actualizat."
+          ? t("fiscalReceipts.notify.stornoDone")
+          : t("fiscalReceipts.notify.statusUpdated")
       );
       void refetch();
     },
-    onError: (e) => notify.error(formatError(e, "Eroare la schimbarea statusului.")),
+    onError: (e) => notify.error(formatError(e, t("fiscalReceipts.notify.statusError"))),
   });
 
   if (isLoading || !detail) {
@@ -634,7 +642,7 @@ function DetailDrawer({ receiptId, companyId, onClose }: DetailDrawerProps) {
       <div className="drawer-overlay" onClick={onClose}>
         <div className="drawer" onClick={(e) => e.stopPropagation()}>
           <div className="drawer-head">
-            <span>Se încarcă…</span>
+            <span>{t("fiscalReceipts.drawer.loading")}</span>
             <button className="sq-btn" onClick={onClose}>
               <Ic name="xMark" />
             </button>
@@ -654,18 +662,18 @@ function DetailDrawer({ receiptId, companyId, onClose }: DetailDrawerProps) {
         <div className="drawer-head">
           <div>
             <span className="drawer-title">
-              Raport Z {receipt.nrZ} / {receipt.serieCasa}
+              {t("fiscalReceipts.drawer.title", { nr: receipt.nrZ, serie: receipt.serieCasa })}
             </span>
             <span className="drawer-sub">{fmtRoDate(receipt.reportDate)}</span>
           </div>
           <div className="drawer-head-acts">
             <span className={"badge " + STATUS_CLASS[receipt.status]}>
-              {STATUS_LABEL[receipt.status]}
+              {STATUS_TKEY[receipt.status] ? t(STATUS_TKEY[receipt.status]) : receipt.status}
             </span>
             {isDraft && (
               <button
                 className="sq-btn"
-                title="Editează"
+                title={t("fiscalReceipts.drawer.edit")}
                 onClick={() => setEditMode(!editMode)}
               >
                 <Ic name="pen" />
@@ -673,7 +681,7 @@ function DetailDrawer({ receiptId, companyId, onClose }: DetailDrawerProps) {
             )}
             <button
               className="sq-btn"
-              title="Print Raport Z"
+              title={t("fiscalReceipts.drawer.print")}
               onClick={() => printRaportZ(detail, company?.legalName ?? "")}
             >
               <Ic name="printer" />
@@ -699,33 +707,33 @@ function DetailDrawer({ receiptId, companyId, onClose }: DetailDrawerProps) {
             {/* Summary */}
             <div className="detail-grid">
               <div className="detail-item">
-                <span className="detail-lbl">Total Z</span>
+                <span className="detail-lbl">{t("fiscalReceipts.drawer.totalZ")}</span>
                 <span className="detail-val">
                   {fmtRON(parseDec(receipt.total))} RON
                 </span>
               </div>
               <div className="detail-item">
-                <span className="detail-lbl">Numerar</span>
+                <span className="detail-lbl">{t("fiscalReceipts.drawer.cash")}</span>
                 <span className="detail-val">
                   {fmtRON(parseDec(receipt.numerar))} RON
                 </span>
               </div>
               <div className="detail-item">
-                <span className="detail-lbl">Card</span>
+                <span className="detail-lbl">{t("fiscalReceipts.drawer.card")}</span>
                 <span className="detail-val">
                   {fmtRON(parseDec(receipt.card))} RON
                 </span>
               </div>
               {parseDec(receipt.tichete) > 0 && (
                 <div className="detail-item">
-                  <span className="detail-lbl">Tichete</span>
+                  <span className="detail-lbl">{t("fiscalReceipts.drawer.vouchers")}</span>
                   <span className="detail-val">
                     {fmtRON(parseDec(receipt.tichete))} RON
                   </span>
                 </div>
               )}
               <div className="detail-item">
-                <span className="detail-lbl">Nr. bonuri</span>
+                <span className="detail-lbl">{t("fiscalReceipts.drawer.nrBonuri")}</span>
                 <span className="detail-val">{receipt.nrBonuri}</span>
               </div>
             </div>
@@ -751,14 +759,14 @@ function DetailDrawer({ receiptId, companyId, onClose }: DetailDrawerProps) {
                   className="btn-dark"
                   onClick={async () => {
                     const ok = await confirm(
-                      "Contabilizați acest bon? Se vor genera înregistrări GL.",
-                      { title: "Confirmare postare" }
+                      t("fiscalReceipts.confirm.postMsg"),
+                      { title: t("fiscalReceipts.confirm.postTitle") }
                     );
                     if (ok) statusMutation.mutate("POSTED");
                   }}
                   disabled={statusMutation.isPending}
                 >
-                  Contabilizează (→ POSTED)
+                  {t("fiscalReceipts.drawer.post")}
                 </button>
               )}
               {isPosted && (
@@ -766,14 +774,14 @@ function DetailDrawer({ receiptId, companyId, onClose }: DetailDrawerProps) {
                   className="btn-ghost btn-danger"
                   onClick={async () => {
                     const ok = await confirm(
-                      "Stornați bonul? Înregistrările GL vor fi șterse.",
-                      { title: "Confirmare storno" }
+                      t("fiscalReceipts.confirm.stornoMsg"),
+                      { title: t("fiscalReceipts.confirm.stornoTitle") }
                     );
                     if (ok) statusMutation.mutate("STORNAT");
                   }}
                   disabled={statusMutation.isPending}
                 >
-                  Stornare (→ STORNAT)
+                  {t("fiscalReceipts.drawer.storno")}
                 </button>
               )}
             </div>
@@ -787,6 +795,7 @@ function DetailDrawer({ receiptId, companyId, onClose }: DetailDrawerProps) {
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export function FiscalReceiptsPage() {
+  const { t } = useTranslation();
   const queryClient = useQueryClient();
   const { activeCompanyId } = useAppStore();
 
@@ -820,16 +829,16 @@ export function FiscalReceiptsPage() {
       void queryClient.invalidateQueries({
         queryKey: ["fiscalReceipts", activeCompanyId],
       });
-      notify.success("Bon șters.");
+      notify.success(t("fiscalReceipts.notify.deleted"));
     },
-    onError: (e) => notify.error(formatError(e, "Eroare la ștergere bon.")),
+    onError: (e) => notify.error(formatError(e, t("fiscalReceipts.notify.deleteError"))),
   });
 
   if (!activeCompanyId) {
     return (
       <div className="main-inner">
         <div className="state-row muted">
-          Selectați o companie activă pentru a vedea bonurile fiscale.
+          {t("fiscalReceipts.selectCompany")}
         </div>
       </div>
     );
@@ -842,14 +851,16 @@ export function FiscalReceiptsPage() {
       {/* Header */}
       <div className="page-head">
         <div>
-          <h1>Bonuri fiscale / Raport Z</h1>
+          <h1>{t("fiscalReceipts.title")}</h1>
           <p className="sub">
-            {count} {count === 1 ? "bon înregistrat" : "bonuri inregistrate"} · {companyName}
+            {count === 1
+              ? t("fiscalReceipts.subOne", { count, company: companyName })
+              : t("fiscalReceipts.subMany", { count, company: companyName })}
           </p>
         </div>
         <div className="head-actions">
           <button className="btn-dark" onClick={() => setShowCreate(true)}>
-            <Ic name="plus" /> Raport Z nou
+            <Ic name="plus" /> {t("fiscalReceipts.newReport")}
           </button>
         </div>
       </div>
@@ -869,21 +880,21 @@ export function FiscalReceiptsPage() {
 
       {/* Content */}
       <div className="scr-card">
-        {isLoading && <div className="state-row">Se încarcă…</div>}
-        {isError && <QueryErrorBanner error={error} label="bonurile fiscale" />}
+        {isLoading && <div className="state-row">{t("fiscalReceipts.loading")}</div>}
+        {isError && <QueryErrorBanner error={error} label={t("fiscalReceipts.errorLabel")} />}
 
         {!isLoading && !isError && (
           <table className="scr-table">
             <thead>
               <tr>
-                <th style={{ width: "130px" }}>Data</th>
-                <th className="r" style={{ width: "120px" }}>Total</th>
-                <th className="r" style={{ width: "110px" }}>TVA 21%</th>
-                <th className="r" style={{ width: "110px" }}>TVA 11%</th>
-                <th className="r" style={{ width: "110px" }}>TVA 9%</th>
-                <th className="r" style={{ width: "120px" }}>Numerar</th>
-                <th className="r" style={{ width: "120px" }}>Card</th>
-                <th style={{ width: "110px" }}>Status</th>
+                <th style={{ width: "130px" }}>{t("fiscalReceipts.table.date")}</th>
+                <th className="r" style={{ width: "120px" }}>{t("fiscalReceipts.table.total")}</th>
+                <th className="r" style={{ width: "110px" }}>{t("fiscalReceipts.table.vat21")}</th>
+                <th className="r" style={{ width: "110px" }}>{t("fiscalReceipts.table.vat11")}</th>
+                <th className="r" style={{ width: "110px" }}>{t("fiscalReceipts.table.vat9")}</th>
+                <th className="r" style={{ width: "120px" }}>{t("fiscalReceipts.table.cash")}</th>
+                <th className="r" style={{ width: "120px" }}>{t("fiscalReceipts.table.card")}</th>
+                <th style={{ width: "110px" }}>{t("fiscalReceipts.table.status")}</th>
                 <th></th>
               </tr>
             </thead>
@@ -893,8 +904,8 @@ export function FiscalReceiptsPage() {
                   <td colSpan={9} style={{ padding: 0 }}>
                     <div className="empty">
                       <div className="ei"><Ic name="receipt" /></div>
-                      <b>Niciun Raport Z.</b>
-                      Apasati Raport Z nou.
+                      <b>{t("fiscalReceipts.empty.title")}</b>
+                      {t("fiscalReceipts.empty.hint")}
                     </div>
                   </td>
                 </tr>
@@ -926,19 +937,19 @@ export function FiscalReceiptsPage() {
                       <td className="r">{fmtRON(parseDec(r.card))}</td>
                       <td>
                         <span className={"badge " + STATUS_CLASS[r.status]}>
-                          {STATUS_LABEL[r.status]}
+                          {STATUS_TKEY[r.status] ? t(STATUS_TKEY[r.status]) : r.status}
                         </span>
                       </td>
                       <td className="row-acts">
                         {r.status === "DRAFT" && (
                           <button
                             className="sq-btn sq-sm"
-                            title="Șterge"
+                            title={t("fiscalReceipts.row.delete")}
                             onClick={async (e) => {
                               e.stopPropagation();
                               const ok = await confirm(
-                                "Ștergeți acest bon fiscal?",
-                                { title: "Confirmare" }
+                                t("fiscalReceipts.confirm.deleteMsg"),
+                                { title: t("fiscalReceipts.confirm.deleteTitle") }
                               );
                               if (ok) deleteMutation.mutate(r.id);
                             }}

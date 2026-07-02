@@ -9,6 +9,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { confirm } from "@tauri-apps/plugin-dialog";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 
 import { api } from "@/lib/tauri";
 import { notify } from "@/lib/toasts";
@@ -19,12 +21,12 @@ interface Props {
   companyId: string;
 }
 
-// Formatare sursă în text lizibil
-function fmtSource(source: string): string {
+// Formatare sursă în text lizibil (etichetele în locales: settings.periodLocks.source.*)
+function fmtSource(t: TFunction, source: string): string {
   if (source.startsWith("declaration:")) {
-    return `Declarație ${source.slice("declaration:".length)}`;
+    return t("settings.periodLocks.source.declaration", { code: source.slice("declaration:".length) });
   }
-  if (source === "manual") return "Manual (contabil)";
+  if (source === "manual") return t("settings.periodLocks.source.manual");
   return source;
 }
 
@@ -38,6 +40,7 @@ function fmtUnix(ts: number): string {
 }
 
 export function PeriodLocksPanel({ companyId }: Props) {
+  const { t } = useTranslation();
   const [locks, setLocks] = useState<PeriodLock[]>([]);
   const [loading, setLoading] = useState(false);
   const [unlocking, setUnlocking] = useState<string | null>(null); // period being unlocked
@@ -49,11 +52,11 @@ export function PeriodLocksPanel({ companyId }: Props) {
       const data = await api.gl.listPeriodLocks(companyId);
       setLocks(data);
     } catch (err) {
-      notify.error(formatError(err, "Eroare la încărcarea perioadelor blocate."));
+      notify.error(formatError(err, t("settings.periodLocks.loadError")));
     } finally {
       setLoading(false);
     }
-  }, [companyId]);
+  }, [companyId, t]);
 
   useEffect(() => {
     void reload();
@@ -61,18 +64,18 @@ export function PeriodLocksPanel({ companyId }: Props) {
 
   const handleUnlock = async (lock: PeriodLock) => {
     const ok = await confirm(
-      `Deblocați perioada ${lock.period}?\n\nAceastă acțiune permite re-generarea notelor GL și modificarea facturilor din această perioadă. Procedați doar dacă depuneți o declarație rectificativă.`,
-      { title: "Deblocare perioadă", kind: "warning" },
+      t("settings.periodLocks.confirmMsg", { period: lock.period }),
+      { title: t("settings.periodLocks.confirmTitle"), kind: "warning" },
     );
     if (!ok) return;
 
     setUnlocking(lock.period);
     try {
       await api.gl.unlockPeriod(companyId, lock.period);
-      notify.success(`Perioada ${lock.period} a fost deblocată.`);
+      notify.success(t("settings.periodLocks.unlocked", { period: lock.period }));
       await reload();
     } catch (err) {
-      notify.error(formatError(err, `Eroare la deblocarea perioadei ${lock.period}.`));
+      notify.error(formatError(err, t("settings.periodLocks.unlockError", { period: lock.period })));
     } finally {
       setUnlocking(null);
     }
@@ -83,7 +86,7 @@ export function PeriodLocksPanel({ companyId }: Props) {
   return (
     <div>
       {loading && (
-        <div style={{ color: "var(--text-2)", fontSize: 13 }}>Se încarcă…</div>
+        <div style={{ color: "var(--text-2)", fontSize: 13 }}>{t("settings.periodLocks.loading")}</div>
       )}
 
       {!loading && locks.length === 0 && (
@@ -95,7 +98,7 @@ export function PeriodLocksPanel({ companyId }: Props) {
             fontStyle: "italic",
           }}
         >
-          Nicio perioadă blocată.
+          {t("settings.periodLocks.empty")}
         </div>
       )}
 
@@ -121,10 +124,10 @@ export function PeriodLocksPanel({ companyId }: Props) {
                   borderBottom: "1px solid var(--border)",
                 }}
               >
-                <th style={thStyle}>Perioadă</th>
-                <th style={thStyle}>Sursă</th>
-                <th style={thStyle}>Data blocării</th>
-                <th style={{ ...thStyle, textAlign: "right" }}>Acțiuni</th>
+                <th style={thStyle}>{t("settings.periodLocks.table.period")}</th>
+                <th style={thStyle}>{t("settings.periodLocks.table.source")}</th>
+                <th style={thStyle}>{t("settings.periodLocks.table.lockedAt")}</th>
+                <th style={{ ...thStyle, textAlign: "right" }}>{t("settings.periodLocks.table.actions")}</th>
               </tr>
             </thead>
             <tbody>
@@ -143,7 +146,7 @@ export function PeriodLocksPanel({ companyId }: Props) {
                     </span>
                   </td>
                   <td style={{ ...tdStyle, color: "var(--text-2)" }}>
-                    {fmtSource(lock.source)}
+                    {fmtSource(t, lock.source)}
                     {lock.note && (
                       <span style={{ color: "var(--text-3)", marginLeft: 6, fontSize: 12 }}>
                         ({lock.note})
@@ -168,7 +171,7 @@ export function PeriodLocksPanel({ companyId }: Props) {
                         opacity: unlocking === lock.period ? 0.6 : 1,
                       }}
                     >
-                      {unlocking === lock.period ? "Se deblochează…" : "Deblochează"}
+                      {unlocking === lock.period ? t("settings.periodLocks.unlocking") : t("settings.periodLocks.unlock")}
                     </button>
                   </td>
                 </tr>

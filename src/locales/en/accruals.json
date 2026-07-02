@@ -1,0 +1,58 @@
+{
+  "accruals": {
+    "title": "Prepaid expenses / deferred income",
+    "sub": "{{count}} entries",
+    "selectCompany": "Select a company.",
+    "loading": "Loading…",
+    "errorLabel": "accruals",
+    "recognizeMonth": "Recognize month",
+    "add": "Add",
+    "table": {
+      "kind": "TYPE",
+      "description": "DESCRIPTION",
+      "account": "ACCOUNT",
+      "total": "TOTAL",
+      "start": "START",
+      "months": "MONTHS"
+    },
+    "empty": {
+      "title": "No prepaid expense / deferred income.",
+      "hint": "Register an amount paid/collected in advance to spread it over months."
+    },
+    "kind": {
+      "prepaid": "Expense",
+      "deferred": "Income"
+    },
+    "row": {
+      "delete": "Delete"
+    },
+    "notify": {
+      "created": "Accrual registered — the initial entry was posted.",
+      "createError": "Error while registering the accrual.",
+      "deleted": "Accrual deleted.",
+      "deleteError": "Error while deleting.",
+      "runPosted": "Recognition {{period}}: {{amount}} RON posted.",
+      "runNone": "No active slice in {{period}}.",
+      "runError": "Error while recognizing."
+    },
+    "modal": {
+      "title": "Prepaid expense / deferred income",
+      "subtitle": "The initial entry (471/472) is posted automatically; recognition happens monthly.",
+      "kind": "Type",
+      "kindPrepaid": "Prepaid expense (471)",
+      "kindDeferred": "Deferred income (472)",
+      "accountExpense": "Expense account (6xx)",
+      "accountIncome": "Income account (7xx)",
+      "accountPhExpense": "e.g. 613",
+      "accountPhIncome": "e.g. 706",
+      "description": "Description",
+      "descriptionPh": "e.g. 12-month car insurance",
+      "total": "Total amount (RON)",
+      "startMonth": "Start month",
+      "months": "Spread (months)",
+      "cancel": "Cancel",
+      "saving": "Saving…",
+      "save": "Register"
+    }
+  }
+}

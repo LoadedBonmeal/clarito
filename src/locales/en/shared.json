@@ -2,7 +2,9 @@
   "shared": {
     "common": {
       "close": "Close",
-      "cancel": "Cancel"
+      "cancel": "Cancel",
+      "loading": "Loading…",
+      "authLoadError": "Could not verify the session. Please restart the application."
     },
     "pdfViewer": {
       "loading": "Loading document…",

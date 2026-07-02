@@ -1,0 +1,162 @@
+{
+  "deconturi": {
+    "title": "Deconturi & Avansuri de trezorerie",
+    "sub": "Avansuri acordate angajatilor si deconturi de cheltuieli · {{company}}",
+    "selectCompany": "Selectați o companie pentru a gestiona deconturile.",
+    "selectCompanyErr": "Selectați o companie",
+    "status": {
+      "granted": "Acordat",
+      "settled": "Decontat",
+      "returned": "Restituit",
+      "draft": "Ciornă",
+      "approved": "Aprobat"
+    },
+    "categories": {
+      "diurna": "Diurnă",
+      "transport": "Transport",
+      "cazare": "Cazare",
+      "combustibil": "Combustibil",
+      "alte": "Alte cheltuieli"
+    },
+    "diurna": {
+      "granted": "Diurnă acordată",
+      "nonTaxable": "Neimpozabilă",
+      "taxable": "Impozabilă",
+      "capALabel": "Plafon A (2,5×23 lei):",
+      "capBLabel": "Plafon B (sal×3/{{days}} zile luc.):",
+      "capAppliedLabel": "Cap aplicat:",
+      "perDay": "{{value}}/zi",
+      "warnTitle": "Atenție:",
+      "warnBody": "Surplusul impozabil de {{amount}} trebuie raportat la statul de salarii (inclusă în baza de calcul CAS/CASS/impozit). NU este postat automat în GL."
+    },
+    "tabs": {
+      "advances": "Avansuri de trezorerie",
+      "reports": "Deconturi"
+    },
+    "grantForm": {
+      "title": "Acorda avans",
+      "employee": "Angajat",
+      "employeePh": "Selecteaza angajat…",
+      "amount": "Suma (RON)",
+      "amountPh": "0,00",
+      "date": "Data",
+      "purpose": "Scop",
+      "purposePh": "ex. deplasare, achizitii",
+      "method": "Mod plată",
+      "methodCash": "Numerar (5311)",
+      "methodBank": "Transfer bancar (5121)",
+      "processing": "Se procesează...",
+      "submit": "Acorda avans"
+    },
+    "advances": {
+      "listTitle": "Avansuri acordate",
+      "table": {
+        "date": "Data",
+        "employee": "Angajat",
+        "purpose": "Scop",
+        "amount": "Suma acordata",
+        "balance": "Sold de decontat",
+        "status": "Status"
+      },
+      "empty": {
+        "title": "Niciun avans acordat.",
+        "hint": "Completati formularul de mai sus pentru a acorda un avans."
+      },
+      "return": "Restituie",
+      "delete": "Șterge",
+      "returnForm": {
+        "title": "Restituire avans",
+        "date": "Data restituire",
+        "cancel": "Anulează",
+        "processing": "Se procesează...",
+        "confirm": "Confirmă restituire"
+      },
+      "confirmDelete": "Ștergeți definitiv acest avans?",
+      "notify": {
+        "granted": "Avans acordat și înregistrat în GL (542).",
+        "grantError": "Eroare la acordarea avansului.",
+        "returned": "Avans restituit. Nota GL (5311/542) înregistrată.",
+        "returnError": "Eroare la restituire.",
+        "deleted": "Avans șters.",
+        "deleteError": "Eroare la ștergere."
+      }
+    },
+    "reportForm": {
+      "title": "Decont nou",
+      "employee": "Angajat (opțional)",
+      "employeePh": "Nume angajat",
+      "advance": "Avans legat (opțional)",
+      "noAdvance": "— fără avans —",
+      "destination": "Destinație",
+      "destinationPh": "ex. București",
+      "from": "De la",
+      "to": "Până la",
+      "days": "Zile delegare",
+      "diurna": "Diurnă acordată (RON)",
+      "salary": "Salariu brut bază (RON) — plafonul B",
+      "reportDate": "Data decont",
+      "notes": "Note",
+      "notesPh": "Opțional",
+      "computeCap": "Calculează plafon diurnă",
+      "linesTitle": "Linii cheltuieli",
+      "lines": {
+        "category": "Categorie",
+        "description": "Descriere",
+        "descriptionPh": "Descriere",
+        "amount": "Sumă (RON)",
+        "vat": "TVA ded.",
+        "account": "Cont",
+        "accountPh": "auto",
+        "add": "+ Linie nouă"
+      },
+      "creating": "Se creează...",
+      "submit": "Salvează decont (ciornă)"
+    },
+    "reports": {
+      "listTitle": "Deconturi de cheltuieli",
+      "table": {
+        "date": "Data",
+        "employee": "Angajat",
+        "destination": "Destinație",
+        "diurna": "Diurnă",
+        "status": "Status"
+      },
+      "empty": {
+        "title": "Niciun decont înregistrat.",
+        "hint": "Completati formularul de mai sus pentru a crea un decont."
+      },
+      "taxableExcess": "Surplus impozabil",
+      "approve": "Aprobă",
+      "delete": "Șterge",
+      "approveForm": {
+        "title": "Aprobare decont",
+        "date": "Data aprobare",
+        "cancel": "Anulează",
+        "processing": "Se procesează...",
+        "confirm": "Confirmă aprobare + GL"
+      },
+      "confirmDelete": "Ștergeți definitiv acest decont?",
+      "notify": {
+        "created": "Decont creat (ciornă).",
+        "createError": "Eroare la creare decont.",
+        "approved": "Decont aprobat. Nota GL înregistrată.",
+        "approveError": "Eroare la aprobare.",
+        "deleted": "Decont șters.",
+        "deleteError": "Eroare la ștergere."
+      },
+      "detail": {
+        "title": "Decont: {{destination}} · {{date}}",
+        "delegation": "Delegare: {{from}} – {{to}} · {{days}} zile",
+        "linesTitle": "Linii cheltuieli",
+        "lines": {
+          "category": "Categorie",
+          "description": "Descriere",
+          "amount": "Sumă",
+          "vat": "TVA ded.",
+          "account": "Cont"
+        },
+        "print": "Tipărire decont"
+      }
+    }
+  }
+}

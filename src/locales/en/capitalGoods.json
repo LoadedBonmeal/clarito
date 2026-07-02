@@ -1,0 +1,86 @@
+{
+  "capitalGoods": {
+    "title": "Capital goods register",
+    "shortTitle": "Capital goods",
+    "sub": "{{count}} goods · VAT adjustment art. 305 (5 years movable / 20 years immovable)",
+    "selectCompany": "Select a company.",
+    "loading": "Loading…",
+    "errorLabel": "capital goods",
+    "add": "Add good",
+    "table": {
+      "description": "DESCRIPTION",
+      "kind": "TYPE",
+      "acquisition": "ACQUISITION",
+      "vatDeducted": "VAT DEDUCTED",
+      "initialPct": "INITIAL %",
+      "status": "STATUS"
+    },
+    "empty": {
+      "title": "No capital goods.",
+      "hint": "Register fixed assets whose deducted VAT is subject to adjustment (art. 305)."
+    },
+    "kind": {
+      "immovable": "immovable · 20 years",
+      "movable": "movable · 5 years"
+    },
+    "status": {
+      "disposed": "disposed",
+      "active": "active"
+    },
+    "row": {
+      "viewAdjustments": "View adjustments",
+      "delete": "Delete"
+    },
+    "notify": {
+      "created": "Capital good registered.",
+      "createError": "Error while registering.",
+      "deleted": "Capital good deleted.",
+      "deleteError": "Error while deleting.",
+      "adjRecorded": "Adjustment recorded and posted to the GL.",
+      "adjError": "Error while recording the adjustment."
+    },
+    "panel": {
+      "meta": "VAT base {{vat}} · adjustment period {{years}} years · annual slice {{slice}}",
+      "record": "Record adjustment",
+      "none": "No adjustments — the good keeps its initial use.",
+      "table": {
+        "year": "YEAR",
+        "newPct": "NEW %",
+        "adjustment": "ADJUSTMENT",
+        "period": "PERIOD",
+        "gl": "GL"
+      },
+      "posted": "posted"
+    },
+    "createModal": {
+      "title": "Add capital good",
+      "subtitle": "Adjustment period: 5 years (movable) / 20 years (immovable) — Fiscal Code art. 305.",
+      "description": "Description",
+      "descriptionPh": "e.g. Production hall",
+      "kind": "Type",
+      "kindImmovable": "Immovable (20 years)",
+      "kindMovable": "Movable / services (5 years)",
+      "acquisitionDate": "Acquisition date",
+      "baseValue": "Base value (RON)",
+      "vatDeducted": "VAT deducted (RON)",
+      "initialPct": "Initial deduction %",
+      "cancel": "Cancel",
+      "saving": "Saving…",
+      "save": "Add"
+    },
+    "recordModal": {
+      "title": "Record VAT adjustment",
+      "subtitle": "{{description}} · {{years}} years · initial deduction {{pct}}%",
+      "yearLabel": "Year within the period (1–{{years}})",
+      "newPct": "New deduction %",
+      "period": "Period (VAT return)",
+      "computed": "Computed adjustment (1/{{years}} × Δ% × VAT):",
+      "clawback": "Clawback — D 635 / C 4426 (deducted VAT becomes a cost).",
+      "extra": "Additional deduction — D 4426 / C 635.",
+      "noChange": "No adjustment (use unchanged).",
+      "cancel": "Cancel",
+      "posting": "Posting…",
+      "submit": "Record + post"
+    }
+  }
+}

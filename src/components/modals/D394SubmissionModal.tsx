@@ -13,6 +13,7 @@ import { useTranslation } from "react-i18next";
 
 import { Ic } from "@/components/shared/Ic";
 import { useAnimatedClose } from "@/hooks/use-animated-close";
+import { useModalFocus } from "@/hooks/use-modal-focus";
 import type { Company, D394CashRow, D394Submission } from "@/types";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -125,6 +126,7 @@ export function D394SubmissionModal({ open, onOpenChange, company, onSubmit, onP
   const incasariI2 = COTE_2026.reduce((s, c) => s + cashNum(c, "bazaI2") + cashNum(c, "tvaI2"), 0);
 
   const { closing, close } = useAnimatedClose(useCallback(() => onOpenChange(false), [onOpenChange]));
+  const dialogRef = useModalFocus<HTMLDivElement>(open);
 
   // Esc closes the modal.
   useEffect(() => {
@@ -228,7 +230,15 @@ export function D394SubmissionModal({ open, onOpenChange, company, onSubmit, onP
       style={{ position: "fixed" }}
       onMouseDown={(e) => { if (e.target === e.currentTarget) close(); }}
     >
-      <div className="modal" style={{ width: 640 }}>
+      <div
+        ref={dialogRef}
+        tabIndex={-1}
+        className="modal"
+        style={{ width: 640 }}
+        role="dialog"
+        aria-modal="true"
+        aria-label={t("shared.d394.title")}
+      >
         <div className="modal-head">
           <div>
             <div className="mt">{t("shared.d394.title")}</div>
