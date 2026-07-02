@@ -442,14 +442,16 @@ function ContactModal({
       setViesInfo(d);
       if (d.valid) {
         notify.success(t("contacts.notify.viesValid"));
+        // A valid VIES answer proves the partner is VAT-registered — set vatPayer so
+        // e-Factura emits the buyer VAT id (BT-48, mandatory on intra-EU "K" invoices
+        // per BR-IC-02). The flag otherwise defaults to false for foreign contacts.
         // Auto-fill name/address only when the member state did not mask them.
-        if (d.name || d.address) {
-          setForm((f) => ({
-            ...f,
-            legalName: d.name || f.legalName,
-            address: d.address || f.address,
-          }));
-        }
+        setForm((f) => ({
+          ...f,
+          vatPayer: true,
+          legalName: d.name || f.legalName,
+          address: d.address || f.address,
+        }));
       } else {
         notify.warn(t("contacts.notify.viesInvalid"));
       }

@@ -38,35 +38,47 @@ const EU_CODES = new Set([
 ]);
 
 /**
- * Pure helper — deduces the correct VAT category from rate, buyer country and
- * seller VAT payer status.
+ * Pure helper — deduces the correct VAT category from rate, buyer country,
+ * seller VAT payer status and (optionally) whether the buyer has a VAT id.
  *
  * Rules:
  *  - vatRate > 0  → 'S' (standard)
- *  - vatRate === 0 — buyer country is resolved FIRST, seller-payer status second:
- *      - buyer is EU (non-RO)              → 'K' (livrare intracomunitară scutită)
- *      - buyer is non-EU and non-RO        → 'G' (export scutit)
- *      - buyer is RO (or unknown):
- *          - seller is NOT a VAT payer     → 'O' (în afara sferei TVA — neplătitor)
- *          - seller IS a VAT payer         → 'E' (scutit intern fără drept de deducere)
+ *  - vatRate === 0 — SELLER VAT status is resolved FIRST:
+ *      - seller is NOT a VAT payer → 'O' (în afara sferei TVA) for ANY buyer
+ *        country. A neplătitor has no VAT id, so K/E/AE/G would all be
+ *        ANAF-fatal (BR-IC-02 / BR-E-02 / BR-AE-02 / BR-G-02 each require the
+ *        seller VAT identifier BT-31).
+ *      - seller IS a VAT payer:
+ *          - buyer is EU (non-RO) WITH a VAT id → 'K' (livrare intracomunitară
+ *            scutită — BR-IC-02 also requires the buyer VAT id BT-48)
+ *          - buyer is EU (non-RO) WITHOUT a VAT id → 'S' (a B2C EU sale is
+ *            normally taxed, not exempt-intra-EU)
+ *          - buyer is non-EU and non-RO         → 'G' (export scutit)
+ *          - buyer is RO (or unknown)           → 'E' (scutit intern fără
+ *            drept de deducere)
  *      NOTE: 'AE' (taxare inversă) is NOT auto-assigned here; it is only correct
  *      for genuine intra-community or domestic reverse-charge situations and must
  *      be set explicitly by the user.
  *  - default                               → 'S'
+ *
+ * `buyerHasVatId` defaults to `true` so callers that cannot know the buyer's
+ * VAT id keep the historical deduction; the rocius preflight (BR-IC-02) still
+ * blocks a K invoice whose buyer has no VAT id before it reaches ANAF.
  */
 export function deduceVatCategory(
   vatRate: number,
   buyerCountry: string,
   sellerVatPayer: boolean,
+  buyerHasVatId: boolean = true,
 ): VatCategory {
   if (vatRate > 0) return "S";
   if (vatRate === 0) {
-    const country = (buyerCountry ?? "").toUpperCase().trim();
-    // Country wins — resolve EU/non-EU first.
-    if (EU_CODES.has(country)) return "K";
-    if (country && country !== "RO") return "G";
-    // Domestic (RO or unknown) — check seller payer status.
+    // Seller status wins — a non-VAT-payer must get 'O' regardless of country.
     if (!sellerVatPayer) return "O";
+    const country = (buyerCountry ?? "").toUpperCase().trim();
+    // K only when the buyer is VAT-registered; a B2C EU sale is normally taxed.
+    if (EU_CODES.has(country)) return buyerHasVatId ? "K" : "S";
+    if (country && country !== "RO") return "G";
     return "E";
   }
   return "S";
@@ -82,6 +94,12 @@ export interface LineItemsEditorProps {
   buyerCountry?: string;
   /** Whether the seller (emitting company) is a VAT payer */
   sellerVatPayer?: boolean;
+  /**
+   * Whether the buyer has a VAT id (CUI/cod TVA) on file — gates the 'K'
+   * auto-deduction for EU buyers (BR-IC-02 requires the buyer VAT id BT-48).
+   * Defaults to true so callers that don't pass it keep the historical behavior.
+   */
+  buyerHasVatId?: boolean;
   /** When true, shows the totals footer */
   showTotals?: boolean;
   /**
@@ -102,6 +120,7 @@ export function LineItemsEditor({
   onChange,
   buyerCountry = "RO",
   sellerVatPayer = true,
+  buyerHasVatId = true,
   showTotals = true,
   companyId,
   currency = "RON",
@@ -131,21 +150,22 @@ export function LineItemsEditor({
   // Track previous deduce-trigger values so we only auto-deduce on real changes.
   const prevDeduceKey = useRef<string>("");
 
-  // Auto-deduce vatCategory for each line when vatRate, buyerCountry, or
-  // sellerVatPayer changes. Manual changes to vatCategory made by the user
-  // are NOT clobbered because the deduceKey only changes for buyerCountry+sellerVatPayer.
+  // Auto-deduce vatCategory for each line when vatRate, buyerCountry,
+  // sellerVatPayer or buyerHasVatId changes. Manual changes to vatCategory made
+  // by the user are NOT clobbered because the deduceKey only changes for
+  // buyerCountry+sellerVatPayer+buyerHasVatId.
   useEffect(() => {
-    const key = `${buyerCountry}|${sellerVatPayer}`;
+    const key = `${buyerCountry}|${sellerVatPayer}|${buyerHasVatId}`;
     if (key === prevDeduceKey.current) return;
     prevDeduceKey.current = key;
 
     const updated = lines.map((l) => ({
       ...l,
-      vatCategory: deduceVatCategory(l.vatRate, buyerCountry, sellerVatPayer),
+      vatCategory: deduceVatCategory(l.vatRate, buyerCountry, sellerVatPayer, buyerHasVatId),
     }));
     onChange(updated);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [buyerCountry, sellerVatPayer]);
+  }, [buyerCountry, sellerVatPayer, buyerHasVatId]);
 
   const updateLine = <K extends keyof CreateLineInput>(
     idx: number,
@@ -160,6 +180,7 @@ export function LineItemsEditor({
           value as number,
           buyerCountry,
           sellerVatPayer,
+          buyerHasVatId,
         );
       }
       // VAT1: when category changes to non-S, force vatRate to 0 so the
@@ -183,6 +204,7 @@ export function LineItemsEditor({
         sellerVatPayer ? 21 : 0,
         buyerCountry,
         sellerVatPayer,
+        buyerHasVatId,
       ),
       rowId: crypto.randomUUID(),
     };

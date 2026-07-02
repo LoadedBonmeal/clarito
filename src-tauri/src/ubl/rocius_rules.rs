@@ -54,6 +54,11 @@ pub fn run_all(ctx: &RuleContext<'_>) -> (Vec<String>, Vec<String>) {
     check!(rule_br_ro_017_buyer_vat_prefix);
     check!(rule_br_ro_018_buyer_country);
 
+    // ── CIUS-RO mandatory addresses (BR-RO-080/090/110) ──────────────────
+    check!(rule_br_ro_080_buyer_street);
+    check!(rule_br_ro_090_buyer_city);
+    check!(rule_br_ro_110_ro_county_code);
+
     // ── Header (BR-RO-020..029) ───────────────────────────────────────────
     check!(rule_br_ro_020_has_lines);
     check!(rule_br_ro_021_invoice_id);
@@ -88,7 +93,8 @@ pub fn run_all(ctx: &RuleContext<'_>) -> (Vec<String>, Vec<String>) {
     // ── EN16931 category "O" / Bucharest sector (BR-O-xx / BR-RO-100..101) ──
     check!(rule_o_category_not_mixed_with_others);
     check!(rule_o_category_seller_not_vat_payer);
-    check!(rule_k_category_requires_vat_payer);
+    check!(rule_exempt_categories_require_vat_payer);
+    check!(rule_k_category_requires_buyer_vat_id);
     check!(rule_bucharest_sector_required);
 
     // ── Warnings (non-blocking) ────────────────────────────────────────────
@@ -206,6 +212,97 @@ fn rule_br_ro_018_buyer_country(ctx: &RuleContext<'_>) -> Option<String> {
         Some("[BR-RO-018] Codul de țară al cumpărătorului este obligatoriu.".into())
     } else {
         None
+    }
+}
+
+// ─── CIUS-RO mandatory buyer address / county rules (BR-RO-080/090/110) ───────
+
+/// CIUS-RO BR-RO-080: linia de adresă a cumpărătorului (BT-50, cbc:StreetName) este
+/// obligatorie necondiționat. Generatorul o emite doar când există — fără preflight
+/// ANAF ar respinge factura.
+fn rule_br_ro_080_buyer_street(ctx: &RuleContext<'_>) -> Option<String> {
+    let has_street = ctx
+        .buyer
+        .address
+        .as_deref()
+        .map(|s| !s.trim().is_empty())
+        .unwrap_or(false);
+    if !has_street {
+        Some(
+            "[BR-RO-080] Adresa cumpărătorului (strada) este obligatorie pentru e-Factura. \
+             Completați adresa clientului."
+                .into(),
+        )
+    } else {
+        None
+    }
+}
+
+/// CIUS-RO BR-RO-090: localitatea cumpărătorului (BT-52, cbc:CityName) este obligatorie
+/// necondiționat.
+fn rule_br_ro_090_buyer_city(ctx: &RuleContext<'_>) -> Option<String> {
+    let has_city = ctx
+        .buyer
+        .city
+        .as_deref()
+        .map(|s| !s.trim().is_empty())
+        .unwrap_or(false);
+    if !has_city {
+        Some(
+            "[BR-RO-090] Localitatea cumpărătorului este obligatorie pentru e-Factura. \
+             Completați localitatea clientului."
+                .into(),
+        )
+    } else {
+        None
+    }
+}
+
+/// True când codul are forma ISO 3166-2:RO cerută de CIUS-RO (^RO-[A-Z]{1,2}$).
+fn is_valid_ro_subentity(code: &str) -> bool {
+    code.strip_prefix("RO-")
+        .map(|rest| {
+            !rest.is_empty() && rest.len() <= 2 && rest.chars().all(|c| c.is_ascii_uppercase())
+        })
+        .unwrap_or(false)
+}
+
+/// CIUS-RO BR-RO-110: pentru părțile cu țara "RO", județul (BT-39 furnizor / BT-54
+/// cumpărător) este obligatoriu și trebuie să se rezolve la un cod ISO 3166-2:RO valid
+/// (`RO-XX`). Se verifică AMBELE părți — generatorul emite `county_to_nuts(county)`
+/// direct, deci un județ lipsă sau nerecunoscut ar produce un CountrySubentity invalid
+/// (sau absent) pe care ANAF îl respinge.
+fn rule_br_ro_110_ro_county_code(ctx: &RuleContext<'_>) -> Option<String> {
+    let mut errs: Vec<String> = Vec::new();
+
+    if ctx.supplier.country.trim().eq_ignore_ascii_case("RO") {
+        let county = ctx.supplier.county.trim();
+        if county.is_empty() || !is_valid_ro_subentity(&county_to_nuts(county)) {
+            errs.push(format!(
+                "județul furnizorului ('{}') lipsește sau nu este un județ românesc valid",
+                county
+            ));
+        }
+    }
+    if ctx.buyer.country.trim().eq_ignore_ascii_case("RO") {
+        let county = ctx.buyer.county.as_deref().unwrap_or("").trim();
+        if county.is_empty() || !is_valid_ro_subentity(&county_to_nuts(county)) {
+            errs.push(format!(
+                "județul cumpărătorului ('{}') lipsește sau nu este un județ românesc valid",
+                county
+            ));
+        }
+    }
+
+    if errs.is_empty() {
+        None
+    } else {
+        Some(format!(
+            "[BR-RO-110] {}. Pentru părțile din România județul este obligatoriu pentru \
+             e-Factura — folosiți numele județului (ex. Cluj, Ilfov) sau sectorul pentru \
+             București (ex. Sector 3).",
+            errs.join("; ")
+        ))
     }
 }
 
@@ -747,19 +844,58 @@ fn rule_o_category_seller_not_vat_payer(ctx: &RuleContext<'_>) -> Option<String>
     }
 }
 
-/// EN16931 BR-IC-02: an invoice with an intra-community-exempt ("K") VAT breakdown must
-/// carry the Seller VAT identifier (BT-31). A non-VAT-payer seller has no VAT id (the
-/// generator correctly omits the VAT PartyTaxScheme for neplătitori), and legally a
-/// neplătitor cannot perform scutit intra-community supplies — block at preflight instead
-/// of letting ANAF reject with BR-IC-02.
-fn rule_k_category_requires_vat_payer(ctx: &RuleContext<'_>) -> Option<String> {
+/// EN16931 BR-IC-02 / BR-E-02 / BR-AE-02 / BR-G-02: ANY exempt VAT breakdown (K / E /
+/// AE / G) requires the Seller VAT identifier (BT-31). A non-VAT-payer seller has no VAT
+/// id (the generator correctly omits the VAT PartyTaxScheme for neplătitori), so every
+/// one of these categories would be an ANAF-fatal rejection — block at preflight and
+/// steer to category "O" (în afara sferei TVA), the only correct 0% category for a
+/// neplătitor.
+fn rule_exempt_categories_require_vat_payer(ctx: &RuleContext<'_>) -> Option<String> {
+    if ctx.supplier.vat_payer {
+        return None;
+    }
+    let mut errs: Vec<String> = Vec::new();
+    for (cat, code, desc) in [
+        ("K", "BR-IC-02", "livrare intracomunitară scutită"),
+        ("G", "BR-G-02", "export în afara UE"),
+        ("E", "BR-E-02", "scutit de TVA"),
+        ("AE", "BR-AE-02", "taxare inversă"),
+    ] {
+        if ctx.lines.iter().any(|l| l.vat_category == cat) {
+            errs.push(format!(
+                "[{code}] Factura conține linii cu categoria TVA '{cat}' ({desc}), dar \
+                 furnizorul nu este plătitor de TVA — ANAF respinge factura pentru că \
+                 lipsește codul de TVA al furnizorului. Pentru un neplătitor folosiți \
+                 categoria 'O' (în afara sferei TVA)."
+            ));
+        }
+    }
+    if errs.is_empty() {
+        None
+    } else {
+        Some(errs.join(" "))
+    }
+}
+
+/// EN16931 BR-IC-02 (partea de cumpărător): o factură cu defalcare TVA "K" (livrare
+/// intracomunitară scutită) trebuie să conțină ȘI identificatorul de TVA al
+/// cumpărătorului (BT-48). Fără CIF/cod de TVA pe contact, generatorul nu poate emite
+/// PartyTaxScheme pentru cumpărător → respingere fatală ANAF.
+fn rule_k_category_requires_buyer_vat_id(ctx: &RuleContext<'_>) -> Option<String> {
     let has_k = ctx.lines.iter().any(|l| l.vat_category == "K");
-    if has_k && !ctx.supplier.vat_payer {
+    let has_buyer_vat_id = ctx
+        .buyer
+        .cui
+        .as_deref()
+        .map(|s| !s.trim().is_empty())
+        .unwrap_or(false);
+    if has_k && !has_buyer_vat_id {
         Some(
             "[BR-IC-02] Factura conține linii cu categoria TVA 'K' (livrare intracomunitară \
-             scutită), dar furnizorul nu este plătitor de TVA. Numai un furnizor înregistrat \
-             în scopuri de TVA poate emite livrări intracomunitare scutite — verificați \
-             categoria TVA a liniilor."
+             scutită), dar cumpărătorul nu are CIF/cod de TVA. O livrare intracomunitară \
+             scutită cere codul de TVA al cumpărătorului (BT-48) — completați codul de TVA \
+             al clientului sau folosiți categoria corectă (o vânzare B2C în UE este în mod \
+             normal taxabilă, categoria 'S')."
                 .into(),
         )
     } else {
@@ -1926,5 +2062,371 @@ mod tests {
             "BR-IC-02 must not fire for a VAT-payer seller, got: {:?}",
             errors
         );
+    }
+
+    // ── FIX 3/6: E/AE/G from a non-VAT-payer seller are blocked too ──────────
+
+    #[test]
+    fn e_line_from_non_vat_payer_fails_br_e_02() {
+        // Mirrors k_line_from_non_vat_payer_fails_br_ic_02: category "E" needs the
+        // seller VAT id (BR-E-02) — a neplătitor must use category "O" instead.
+        let invoice = sample_invoice();
+        let mut e_line = sample_line();
+        e_line.vat_category = "E".into();
+        e_line.vat_rate = "0.00".into();
+        e_line.vat_amount = "0.00".into();
+        let lines = vec![e_line];
+        let mut supplier = sample_supplier();
+        supplier.vat_payer = false;
+        let buyer = sample_buyer();
+        let ctx = RuleContext {
+            invoice: &invoice,
+            lines: &lines,
+            supplier: &supplier,
+            buyer: &buyer,
+            storno_ref: None,
+        };
+        let (errors, _) = run_all(&ctx);
+        assert!(
+            errors.iter().any(|e| e.contains("[BR-E-02]")),
+            "Expected BR-E-02 error for an E line from a non-VAT-payer seller, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn g_line_from_non_vat_payer_fails_br_g_02() {
+        // Category "G" (export outside the EU) also needs the seller VAT id (BR-G-02).
+        let invoice = sample_invoice();
+        let mut g_line = sample_line();
+        g_line.vat_category = "G".into();
+        g_line.vat_rate = "0.00".into();
+        g_line.vat_amount = "0.00".into();
+        let lines = vec![g_line];
+        let mut supplier = sample_supplier();
+        supplier.vat_payer = false;
+        let buyer = sample_buyer();
+        let ctx = RuleContext {
+            invoice: &invoice,
+            lines: &lines,
+            supplier: &supplier,
+            buyer: &buyer,
+            storno_ref: None,
+        };
+        let (errors, _) = run_all(&ctx);
+        assert!(
+            errors.iter().any(|e| e.contains("[BR-G-02]")),
+            "Expected BR-G-02 error for a G line from a non-VAT-payer seller, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn ae_line_from_non_vat_payer_fails_br_ae_02() {
+        let invoice = sample_invoice();
+        let mut ae_line = sample_line();
+        ae_line.vat_category = "AE".into();
+        ae_line.vat_rate = "0.00".into();
+        ae_line.vat_amount = "0.00".into();
+        let lines = vec![ae_line];
+        let mut supplier = sample_supplier();
+        supplier.vat_payer = false;
+        let buyer = sample_buyer();
+        let ctx = RuleContext {
+            invoice: &invoice,
+            lines: &lines,
+            supplier: &supplier,
+            buyer: &buyer,
+            storno_ref: None,
+        };
+        let (errors, _) = run_all(&ctx);
+        assert!(
+            errors.iter().any(|e| e.contains("[BR-AE-02]")),
+            "Expected BR-AE-02 error for an AE line from a non-VAT-payer seller, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn e_and_g_lines_from_vat_payer_pass_exempt_seller_rule() {
+        // Guard: the generalized rule never fires for a VAT-payer seller.
+        for cat in ["E", "G", "AE"] {
+            let invoice = sample_invoice();
+            let mut line = sample_line();
+            line.vat_category = cat.into();
+            line.vat_rate = "0.00".into();
+            line.vat_amount = "0.00".into();
+            let lines = vec![line];
+            let supplier = sample_supplier(); // vat_payer = true
+            let buyer = sample_buyer();
+            let ctx = RuleContext {
+                invoice: &invoice,
+                lines: &lines,
+                supplier: &supplier,
+                buyer: &buyer,
+                storno_ref: None,
+            };
+            let (errors, _) = run_all(&ctx);
+            assert!(
+                !errors.iter().any(|e| {
+                    e.contains("[BR-E-02]") || e.contains("[BR-G-02]") || e.contains("[BR-AE-02]")
+                }),
+                "Exempt-seller rule must not fire for a VAT-payer seller ({}), got: {:?}",
+                cat,
+                errors
+            );
+        }
+    }
+
+    // ── FIX 1 (preflight): K line requires the buyer VAT id (BT-48) ──────────
+
+    #[test]
+    fn k_line_without_buyer_vat_id_fails_br_ic_02() {
+        let invoice = sample_invoice();
+        let mut k_line = sample_line();
+        k_line.vat_category = "K".into();
+        k_line.vat_rate = "0.00".into();
+        k_line.vat_amount = "0.00".into();
+        let lines = vec![k_line];
+        let supplier = sample_supplier(); // vat_payer = true
+        let mut buyer = sample_buyer();
+        buyer.cui = None;
+        buyer.is_individual = true; // avoid the unrelated BR-RO-016 identifier rule
+        buyer.country = "DE".into();
+        let ctx = RuleContext {
+            invoice: &invoice,
+            lines: &lines,
+            supplier: &supplier,
+            buyer: &buyer,
+            storno_ref: None,
+        };
+        let (errors, _) = run_all(&ctx);
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.contains("[BR-IC-02]") && e.contains("cumpărătorul")),
+            "Expected buyer-side BR-IC-02 error for a K line without a buyer VAT id, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn k_line_with_buyer_vat_id_passes_buyer_rule() {
+        let invoice = sample_invoice();
+        let mut k_line = sample_line();
+        k_line.vat_category = "K".into();
+        k_line.vat_rate = "0.00".into();
+        k_line.vat_amount = "0.00".into();
+        let lines = vec![k_line];
+        let supplier = sample_supplier();
+        let mut buyer = sample_buyer();
+        buyer.cui = Some("DE123456789".into());
+        buyer.country = "DE".into();
+        let ctx = RuleContext {
+            invoice: &invoice,
+            lines: &lines,
+            supplier: &supplier,
+            buyer: &buyer,
+            storno_ref: None,
+        };
+        let (errors, _) = run_all(&ctx);
+        assert!(
+            !errors.iter().any(|e| e.contains("[BR-IC-02]")),
+            "No BR-IC-02 error expected when both parties carry VAT ids, got: {:?}",
+            errors
+        );
+    }
+
+    // ── FIX 2: mandatory buyer address / RO county preflight ─────────────────
+
+    #[test]
+    fn missing_buyer_street_fails_br_ro_080() {
+        let invoice = sample_invoice();
+        let lines = vec![sample_line()];
+        let supplier = sample_supplier();
+        let mut buyer = sample_buyer();
+        buyer.address = None;
+        let ctx = RuleContext {
+            invoice: &invoice,
+            lines: &lines,
+            supplier: &supplier,
+            buyer: &buyer,
+            storno_ref: None,
+        };
+        let (errors, _) = run_all(&ctx);
+        assert!(
+            errors.iter().any(|e| e.contains("[BR-RO-080]")),
+            "Expected BR-RO-080 error for a buyer without a street address, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn blank_buyer_street_fails_br_ro_080() {
+        let invoice = sample_invoice();
+        let lines = vec![sample_line()];
+        let supplier = sample_supplier();
+        let mut buyer = sample_buyer();
+        buyer.address = Some("   ".into());
+        let ctx = RuleContext {
+            invoice: &invoice,
+            lines: &lines,
+            supplier: &supplier,
+            buyer: &buyer,
+            storno_ref: None,
+        };
+        let (errors, _) = run_all(&ctx);
+        assert!(
+            errors.iter().any(|e| e.contains("[BR-RO-080]")),
+            "Expected BR-RO-080 error for a whitespace-only buyer address, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn missing_buyer_city_fails_br_ro_090() {
+        let invoice = sample_invoice();
+        let lines = vec![sample_line()];
+        let supplier = sample_supplier();
+        let mut buyer = sample_buyer();
+        buyer.city = None;
+        let ctx = RuleContext {
+            invoice: &invoice,
+            lines: &lines,
+            supplier: &supplier,
+            buyer: &buyer,
+            storno_ref: None,
+        };
+        let (errors, _) = run_all(&ctx);
+        assert!(
+            errors.iter().any(|e| e.contains("[BR-RO-090]")),
+            "Expected BR-RO-090 error for a buyer without a city, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn ro_buyer_missing_county_fails_br_ro_110() {
+        let invoice = sample_invoice();
+        let lines = vec![sample_line()];
+        let supplier = sample_supplier();
+        let mut buyer = sample_buyer(); // country = RO
+        buyer.county = None;
+        let ctx = RuleContext {
+            invoice: &invoice,
+            lines: &lines,
+            supplier: &supplier,
+            buyer: &buyer,
+            storno_ref: None,
+        };
+        let (errors, _) = run_all(&ctx);
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.contains("[BR-RO-110]") && e.contains("cumpărătorului")),
+            "Expected BR-RO-110 error for an RO buyer without a county, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn ro_buyer_unrecognized_county_fails_br_ro_110() {
+        let invoice = sample_invoice();
+        let lines = vec![sample_line()];
+        let supplier = sample_supplier();
+        let mut buyer = sample_buyer();
+        buyer.county = Some("Judetul Inexistent".into()); // county_to_nuts passes it through raw
+        let ctx = RuleContext {
+            invoice: &invoice,
+            lines: &lines,
+            supplier: &supplier,
+            buyer: &buyer,
+            storno_ref: None,
+        };
+        let (errors, _) = run_all(&ctx);
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.contains("[BR-RO-110]") && e.contains("cumpărătorului")),
+            "Expected BR-RO-110 error for an unmappable RO buyer county, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn ro_seller_missing_county_fails_br_ro_110() {
+        let invoice = sample_invoice();
+        let lines = vec![sample_line()];
+        let mut supplier = sample_supplier();
+        supplier.county = "".into();
+        let buyer = sample_buyer();
+        let ctx = RuleContext {
+            invoice: &invoice,
+            lines: &lines,
+            supplier: &supplier,
+            buyer: &buyer,
+            storno_ref: None,
+        };
+        let (errors, _) = run_all(&ctx);
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.contains("[BR-RO-110]") && e.contains("furnizorului")),
+            "Expected BR-RO-110 error for an RO seller without a county, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn non_ro_buyer_without_county_passes_br_ro_110() {
+        // BR-RO-110 applies only to RO parties: a DE buyer with no county must pass
+        // (street and city stay mandatory via 080/090).
+        let invoice = sample_invoice();
+        let lines = vec![sample_line()];
+        let supplier = sample_supplier(); // RO seller with valid county (Ilfov)
+        let mut buyer = sample_buyer();
+        buyer.country = "DE".into();
+        buyer.county = None;
+        buyer.cui = Some("DE123456789".into());
+        let ctx = RuleContext {
+            invoice: &invoice,
+            lines: &lines,
+            supplier: &supplier,
+            buyer: &buyer,
+            storno_ref: None,
+        };
+        let (errors, _) = run_all(&ctx);
+        assert!(
+            !errors.iter().any(|e| e.contains("[BR-RO-110]")),
+            "BR-RO-110 must not fire for a non-RO buyer, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn valid_ro_counties_pass_br_ro_110() {
+        // Names, sectors and pre-resolved ISO codes must all pass.
+        for county in ["Cluj", "Ilfov", "Sector 3", "RO-B", "RO-CJ", "Timiș"] {
+            let invoice = sample_invoice();
+            let lines = vec![sample_line()];
+            let mut supplier = sample_supplier();
+            supplier.county = county.into();
+            supplier.city = "Sector 3".into(); // keeps the Bucharest sector rule happy
+            let buyer = sample_buyer();
+            let ctx = RuleContext {
+                invoice: &invoice,
+                lines: &lines,
+                supplier: &supplier,
+                buyer: &buyer,
+                storno_ref: None,
+            };
+            let (errors, _) = run_all(&ctx);
+            assert!(
+                !errors.iter().any(|e| e.contains("[BR-RO-110]")),
+                "BR-RO-110 must not fire for valid county '{}', got: {:?}",
+                county,
+                errors
+            );
+        }
     }
 }

@@ -143,11 +143,17 @@ pub fn generate_ubl(input: &GeneratorInput) -> AppResult<String> {
     // with any other VAT category. Compute once and thread to both party writers.
     let has_o_line = input.lines.iter().any(|l| l.vat_category == "O");
 
+    // BR-IC-02: an invoice with a category "K" line (intra-EU exempt supply) must carry the
+    // Buyer VAT identifier (BT-48) even when the stored contact has vat_payer=false (the flag
+    // defaults false for foreign contacts) — a K supply legally implies a VAT-registered buyer.
+    // Also reused below for the Delivery block (BR-IC-11/12).
+    let has_k_line = input.lines.iter().any(|l| l.vat_category == "K");
+
     // ── AccountingSupplierParty ──────────────────────────────────────────────
     write_supplier_party(&mut writer, seller, has_o_line)?;
 
     // ── AccountingCustomerParty ──────────────────────────────────────────────
-    write_customer_party(&mut writer, buyer, currency, has_o_line)?;
+    write_customer_party(&mut writer, buyer, currency, has_o_line, has_k_line)?;
 
     // ── Delivery (EN16931 BR-IC-11/BR-IC-12) ─────────────────────────────────
     // An invoice with any category "K" line (intra-EU supply) must contain the actual
@@ -156,7 +162,6 @@ pub fn generate_ubl(input: &GeneratorInput) -> AppResult<String> {
     // the buyer's country. UBL element order: cac:Delivery MUST come after
     // AccountingCustomerParty (no PayeeParty/TaxRepresentativeParty in this generator)
     // and before cac:PaymentMeans.
-    let has_k_line = input.lines.iter().any(|l| l.vat_category == "K");
     if has_k_line {
         writer
             .write_event(Event::Start(BytesStart::new("cac:Delivery")))
@@ -325,11 +330,14 @@ fn write_supplier_party(
         writer
             .write_event(Event::Start(BytesStart::new("cac:PartyTaxScheme")))
             .map_err(|e| AppError::Xml(e.to_string()))?;
-        let seller_cui_digits = seller
-            .cui
-            .trim()
-            .trim_start_matches("RO")
-            .trim_start_matches("ro");
+        // Strip an existing country prefix case-insensitively ("RO"/"ro"/"Ro"/"rO") and
+        // re-emit it uppercase — BR-CO-09 requires the ISO 3166 prefix in capitals, and a
+        // lowercase "ro..." emitted verbatim is a fatal schematron violation.
+        let seller_cui_trimmed = seller.cui.trim();
+        let seller_cui_digits = match seller_cui_trimmed.as_bytes() {
+            [b'R' | b'r', b'O' | b'o', ..] => &seller_cui_trimmed[2..],
+            _ => seller_cui_trimmed,
+        };
         let supplier_cui_xml = format!("RO{}", seller_cui_digits);
         write_text(writer, "cbc:CompanyID", &supplier_cui_xml)?;
         writer
@@ -371,6 +379,7 @@ fn write_customer_party(
     buyer: &Contact,
     _currency: &str,
     has_o_line: bool,
+    has_k_line: bool,
 ) -> AppResult<()> {
     writer
         .write_event(Event::Start(BytesStart::new("cac:AccountingCustomerParty")))
@@ -421,7 +430,12 @@ fn write_customer_party(
     // AND the invoice has no category "O" line. Previously this synthesized a "RO"+CUI
     // VAT identifier for ANY Romanian buyer with a CUI on file, which falsely asserted
     // VAT registration for non-VAT-payer buyers (a core e-Factura user class).
-    if buyer.vat_payer && !has_o_line {
+    //
+    // BR-IC-02: a category "K" (intra-EU exempt) invoice must carry the Buyer VAT
+    // identifier (BT-48) — a K supply legally implies a VAT-registered buyer even when
+    // the stored contact flag says vat_payer=false (it defaults false for foreign EU
+    // buyers), so `has_k_line` overrides the flag. The O-line exclusion still wins.
+    if (buyer.vat_payer || has_k_line) && !has_o_line {
         if let Some(cui) = &buyer.cui {
             writer
                 .write_event(Event::Start(BytesStart::new("cac:PartyTaxScheme")))
@@ -435,8 +449,10 @@ fn write_customer_party(
                 && trimmed.as_bytes()[0].is_ascii_alphabetic()
                 && trimmed.as_bytes()[1].is_ascii_alphabetic();
             let buyer_cui_xml = if starts_with_country_prefix {
-                // Caller already provided VAT-ID with country prefix — trust it.
-                trimmed.to_string()
+                // Caller already provided VAT-ID with country prefix — trust the code but
+                // normalize its case: BR-CO-09 requires the uppercase ISO 3166 prefix, and
+                // a lowercase "ro12345678" emitted verbatim is a fatal schematron violation.
+                format!("{}{}", trimmed[..2].to_ascii_uppercase(), &trimmed[2..])
             } else if country_code.is_empty() || country_code == "RO" {
                 format!("RO{}", trimmed)
             } else {
@@ -1242,6 +1258,129 @@ mod tests {
             !customer_block.contains("RODE123456789"),
             "must not double-prefix DE VAT-ID"
         );
+    }
+
+    #[test]
+    fn k_invoice_emits_buyer_vat_id_even_for_non_vat_payer_flag() {
+        // FIX 1 (BR-IC-02): an intra-EU (K) invoice must carry the Buyer VAT identifier
+        // (BT-48). Contact.vat_payer defaults false for foreign EU buyers, so gating the
+        // buyer PartyTaxScheme on vat_payer alone dropped BT-48 → ANAF-fatal BR-IC-02.
+        // A K line must force the buyer PartyTaxScheme when a VAT id (cui) is on file.
+        let mut input = sample_input();
+        input.buyer.country = "DE".to_string();
+        input.buyer.vat_payer = false; // stored flag left at default
+        input.buyer.cui = Some("DE123456789".to_string());
+        input.lines[0].vat_category = "K".to_string();
+        input.lines[0].vat_rate = "0.00".to_string();
+        input.lines[0].vat_amount = "0.00".to_string();
+        input.invoice.vat_amount = "0.00".to_string();
+        input.invoice.total_amount = input.invoice.subtotal_amount.clone();
+
+        let xml = generate_ubl(&input).expect("should generate XML");
+        let body = xml.trim_start_matches('\u{FEFF}');
+        // Scope to the customer party proper (the supplier party — with its own
+        // PartyTaxScheme — precedes it in the document).
+        let customer_party = body
+            .split("<cac:AccountingCustomerParty>")
+            .nth(1)
+            .and_then(|s| s.split("</cac:AccountingCustomerParty>").next())
+            .unwrap_or("");
+        assert!(
+            customer_party.contains("<cac:PartyTaxScheme>"),
+            "K invoice must emit buyer PartyTaxScheme regardless of vat_payer flag, got: {}",
+            customer_party
+        );
+        assert!(
+            customer_party.contains("<cbc:CompanyID>DE123456789</cbc:CompanyID>"),
+            "K invoice buyer PartyTaxScheme must carry the DE VAT id, got: {}",
+            customer_party
+        );
+    }
+
+    #[test]
+    fn non_k_invoice_still_omits_buyer_vat_scheme_for_non_vat_payer() {
+        // Regression guard for the correct v0.7.4 behavior: WITHOUT a K line, a
+        // non-VAT-payer buyer must still get NO PartyTaxScheme (BR-CO-09).
+        let mut input = sample_input(); // category "S" line
+        input.buyer.vat_payer = false;
+        input.buyer.cui = Some("87654321".to_string());
+        let xml = generate_ubl(&input).expect("should generate XML");
+        let body = xml.trim_start_matches('\u{FEFF}');
+        let customer_block = body
+            .split("</cac:AccountingCustomerParty>")
+            .next()
+            .unwrap_or(body);
+        // Scope to the customer party only (the supplier block precedes it).
+        let customer_party = customer_block
+            .split("<cac:AccountingCustomerParty>")
+            .nth(1)
+            .unwrap_or(customer_block);
+        assert!(
+            !customer_party.contains("cac:PartyTaxScheme"),
+            "non-K invoice must NOT emit buyer PartyTaxScheme for a non-VAT-payer, got: {}",
+            customer_party
+        );
+    }
+
+    #[test]
+    fn lowercase_ro_buyer_cui_prefix_is_uppercased() {
+        // FIX 5 (BR-CO-09): a stored buyer CUI "ro12345678" must be emitted with an
+        // uppercase country prefix in PartyTaxScheme/CompanyID — the lowercase prefix
+        // emitted verbatim is a fatal schematron violation.
+        let mut input = sample_input();
+        input.buyer.country = "RO".to_string();
+        input.buyer.cui = Some("ro12345678".to_string());
+        let xml = generate_ubl(&input).expect("should generate XML");
+        let body = xml.trim_start_matches('\u{FEFF}');
+        // Scope to the customer party proper (the supplier party — with its own
+        // PartyTaxScheme — precedes it in the document).
+        let customer_party = body
+            .split("<cac:AccountingCustomerParty>")
+            .nth(1)
+            .and_then(|s| s.split("</cac:AccountingCustomerParty>").next())
+            .unwrap_or("");
+        let tax_scheme_block = customer_party
+            .split("<cac:PartyTaxScheme>")
+            .nth(1)
+            .and_then(|s| s.split("</cac:PartyTaxScheme>").next())
+            .unwrap_or("");
+        assert!(
+            tax_scheme_block.contains("<cbc:CompanyID>RO12345678</cbc:CompanyID>"),
+            "buyer PartyTaxScheme must carry the uppercased RO prefix, got: {}",
+            tax_scheme_block
+        );
+        assert!(
+            !tax_scheme_block.contains("ro12345678"),
+            "buyer PartyTaxScheme must NOT contain the lowercase-prefixed CUI, got: {}",
+            tax_scheme_block
+        );
+    }
+
+    #[test]
+    fn lowercase_ro_seller_cui_prefix_is_uppercased() {
+        // FIX 5 (seller side): "ro12345678" and mixed-case "Ro12345678" must both be
+        // normalized to "RO12345678" in the supplier PartyTaxScheme.
+        for stored in ["ro12345678", "Ro12345678", "rO12345678"] {
+            let mut input = sample_input();
+            input.seller.cui = stored.to_string();
+            let xml = generate_ubl(&input).expect("should generate XML");
+            let body = xml.trim_start_matches('\u{FEFF}');
+            let supplier_block = body
+                .split("</cac:AccountingSupplierParty>")
+                .next()
+                .unwrap_or(body);
+            let tax_scheme_block = supplier_block
+                .split("<cac:PartyTaxScheme>")
+                .nth(1)
+                .and_then(|s| s.split("</cac:PartyTaxScheme>").next())
+                .unwrap_or("");
+            assert!(
+                tax_scheme_block.contains("<cbc:CompanyID>RO12345678</cbc:CompanyID>"),
+                "seller CUI '{}' must be emitted as RO12345678, got: {}",
+                stored,
+                tax_scheme_block
+            );
+        }
     }
 
     #[test]

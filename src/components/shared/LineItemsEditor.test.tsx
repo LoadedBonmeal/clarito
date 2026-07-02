@@ -69,21 +69,22 @@ describe("deduceVatCategory (inline — pending alias fix in vitest.config.ts)",
     expect(deduceVatCategory(9, "FR", true)).toBe("S");
   });
 
-  // ── vatRate === 0, buyer country wins; non-payer domestic → O ───────────
-  // Country is resolved FIRST. A non-VAT-payer selling to an EU buyer still
-  // gets K; to a non-EU buyer still gets G; only domestic (RO/unknown) with
-  // a non-payer seller becomes O (out of scope), NOT AE (reverse charge).
+  // ── vatRate === 0, seller VAT status wins: non-payer → O for ANY country ──
+  // A neplătitor has no VAT id, so K/E/AE/G would each be ANAF-fatal
+  // (BR-IC-02 / BR-E-02 / BR-AE-02 / BR-G-02 require the seller VAT id BT-31).
+  // Everything a neplătitor invoices is out of VAT scope → 'O', regardless of
+  // the buyer's country — and never AE (reverse charge).
 
   it("rate 0 RO non-payer → O (out of scope — neplătitor TVA, domestic)", () => {
     expect(deduceVatCategory(0, "RO", false)).toBe("O");
   });
 
-  it("rate 0 DE non-payer → K (EU country wins over seller-payer status)", () => {
-    expect(deduceVatCategory(0, "DE", false)).toBe("K");
+  it("rate 0 DE non-payer → O (seller status wins over EU buyer country)", () => {
+    expect(deduceVatCategory(0, "DE", false)).toBe("O");
   });
 
-  it("rate 0 US non-payer → G (non-EU country wins over seller-payer status)", () => {
-    expect(deduceVatCategory(0, "US", false)).toBe("G");
+  it("rate 0 US non-payer → O (seller status wins over non-EU buyer country)", () => {
+    expect(deduceVatCategory(0, "US", false)).toBe("O");
   });
 
   // ── vatRate === 0, seller IS vat payer, EU non-RO buyer → K ─────────
@@ -98,6 +99,24 @@ describe("deduceVatCategory (inline — pending alias fix in vitest.config.ts)",
 
   it("rate 0 AT vatPayer → K", () => {
     expect(deduceVatCategory(0, "AT", true)).toBe("K");
+  });
+
+  // ── FIX 4: K requires the buyer to have a VAT id (BR-IC-02 / BT-48) ──────
+
+  it("rate 0 DE vatPayer, buyer WITHOUT VAT id → S (B2C EU sale is normally taxed)", () => {
+    expect(deduceVatCategory(0, "DE", true, false)).toBe("S");
+  });
+
+  it("rate 0 DE vatPayer, buyer WITH VAT id → K (explicit)", () => {
+    expect(deduceVatCategory(0, "DE", true, true)).toBe("K");
+  });
+
+  it("rate 0 US vatPayer, buyer without VAT id → G (export unaffected by VAT-id gate)", () => {
+    expect(deduceVatCategory(0, "US", true, false)).toBe("G");
+  });
+
+  it("rate 0 DE non-payer, buyer without VAT id → O (seller status still wins)", () => {
+    expect(deduceVatCategory(0, "DE", false, false)).toBe("O");
   });
 
   // ── vatRate === 0, seller IS vat payer, non-EU non-RO buyer → G ─────
