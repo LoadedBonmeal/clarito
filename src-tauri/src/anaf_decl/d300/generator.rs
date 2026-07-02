@@ -166,6 +166,10 @@ pub fn generate_d300_xml(rows: &D300Rows, ver: &SchemaVersion) -> AppResult<Stri
     push_opt!(rows.r30_1, "R30_1");
     push_opt!(rows.r30_2, "R30_2");
     push_opt!(rows.r31_2, "R31_2");
+    // R26_1 — achiziții scutite/neimpozabile (rd.28 col.1, Wave 5 FIX 2); bază-only.
+    // XSD position: between R44_2 and R27_1 (sample_d300_v12.xml:95) — attribute order
+    // is not schema-significant, but keep it adjacent to the purchase block it closes.
+    push_opt!(rows.r26_1, "R26_1");
 
     // Totals
     push_opt!(rows.r17_1, "R17_1");

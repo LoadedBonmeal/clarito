@@ -41,6 +41,7 @@
 //! | AE       | —        | 21%           | R25_1_1    | R25_1_2    | Mirror R12_1_1/R12_1_2              |
 //! | AE       | —        | 11%           | R25_2_1    | R25_2_2    | Mirror R12_2_1/R12_2_2              |
 //! | AE (Σ)   | —        | —             | R25_1      | R25_2      | = R12_1 / R12_2 (DUK enforced)     |
+//! | E/Z/O    | —        | 0%            | R26_1      | —          | Rd.28 scutite/neimpozabile (Wave 5) |
 //!
 //! ## DUK EQUALITY CONSTRAINTS (schema enforced, violations = E: errors)
 //!
@@ -234,6 +235,14 @@ pub struct D300Rows {
     /// R31_2 — ajustări conform pro-rata/ajustări de taxă (rd.34 printed; schema row 33).
     ///   Signed (IntNeg15SType), VAT-only. Carries the art. 305 capital-goods adjustment; feeds R32.
     pub r31_2: Option<i64>,
+    /// R26_1 — achiziții de bunuri și servicii scutite de taxă sau neimpozabile (rd.28
+    ///   col.1, structura D300 v12 poz. 99). Bază-only (no VAT column in the XSD).
+    ///   Populated from purchase categories E/Z/O. Informational: excluded from R27
+    ///   (the R27_1 DUK formula lists R18/R19/R20/R21/R22/R23/R24/R25/R74/R75 only) but
+    ///   included in the totalPlata_A control sum (= suma câmp 27–124; R26_1 = câmp 99).
+    ///   Sub-row R26_1_1 (rd.28.1, achiziții de servicii intracom. scutite) is NOT
+    ///   populated — no intra_eu_kind signal for exempt purchase groups (cf. R3_1_1).
+    pub r26_1: Option<i64>,
 
     // ── Totals (computed) ─────────────────────────────────────────────────────
     /// R17_1 / R17_2 — TOTAL TAXĂ COLECTATĂ (baza / TVA)
@@ -426,7 +435,30 @@ pub fn map_to_rows(
     capital_goods_adjustment: i64,
 ) -> AppResult<D300Rows> {
     // ── Header ────────────────────────────────────────────────────────────────
-    let luna = period.month() as i32;
+    // `luna` = ULTIMA lună a perioadei de raportare, derivată din tip_decont (Wave 5 FIX 1).
+    // VERIFY-FIRST — structura_D300_v12.pdf, câmp 18 (tip_decont) + câmp 2 (luna):
+    //   "Daca tip_decont = L, atunci luna_r in (01..12)"
+    //   "Daca tip_decont = T, atunci luna_r in (02,03,05,06,08,09,11,12)"  → standard =
+    //     ultima lună a trimestrului (03/06/09/12); 02/05/08/11 doar pentru cazul special
+    //     al plătitorului trimestrial cu achiziții intracomunitare (decont parțial cumulat),
+    //     pe care aplicația nu îl generează automat.
+    //   "Daca tip_decont = S, atunci luna_r in (06,12)"
+    //   "Daca tip_decont = A, atunci luna_r = 12"
+    // `period` = period_from (prima zi a perioadei lărgite trimise de UI), deci luna sa
+    // aparține aceluiași trimestru/semestru/an ca întreaga perioadă.
+    let start_month = period.month() as i32;
+    let luna = match submission.tip_decont.as_str() {
+        "T" => ((start_month - 1) / 3) * 3 + 3, // ultima lună a trimestrului calendaristic
+        "S" => {
+            if start_month <= 6 {
+                6
+            } else {
+                12
+            }
+        }
+        "A" => 12,
+        _ => start_month, // "L" (și orice valoare necunoscută) → luna calendaristică
+    };
     let an = period.year();
     if !(2017..=2100).contains(&an) {
         return Err(AppError::Validation(format!(
@@ -679,6 +711,31 @@ pub fn map_to_rows(
         &mut r23_vat,
     );
 
+    // R26_1 (rd.28 col.1) — achiziții scutite/neimpozabile (Wave 5 FIX 2).
+    // VERIFY-FIRST — structura_D300_v12.pdf poz. 99: "Achiziţii de bunuri şi servicii
+    // scutite de taxă sau neimpozabile, din care:" (bază-only; XSD are doar R26_1, fără
+    // coloană TVA). Poz. 100 = sub-rândul R26_1_1 (rd.28.1, "Achiziţii de servicii
+    // intracomunitare scutite de taxă") — NEPOPULAT: purchase_groups nu poartă
+    // intra_eu_kind pentru categoriile scutite, deci serviciile intracom. scutite nu pot
+    // fi separate la acest nivel (același pattern ca R3_1_1 pe vânzări).
+    // Totaluri (verificate în PDF):
+    //   * R27_1 (poz. 101, "TOTAL TAXĂ DEDUCTIBILĂ") = R18_1+R19_1+R20_1+R21_1+R22_1+
+    //     R23_1+R24_1+R25_1+R74_1+R75_1 — R26_1 este EXCLUS explicit ("cu excepţia celor
+    //     de la rd. ... 26.1 ..." în textul rândului) → NU se adaugă în R27.
+    //   * totalPlata_A (poz. 26) = suma(câmp 27 la 124); R26_1 = câmpul 99 → INTRĂ în
+    //     suma de control (vezi lista de mai jos).
+    // Mapare categorii (deduceVatCategory / BIZ-12): E = scutit fără drept de deducere,
+    // Z = cotă zero cu drept, O = în afara sferei TVA (neimpozabil) — toate „scutite de
+    // taxă sau neimpozabile" pe partea de achiziții.
+    let mut r26_1_base = Decimal::ZERO;
+    let mut _r26_1_vat = Decimal::ZERO; // bază-only — nu există coloană TVA pentru rd.28
+    accumulate(
+        &report.purchase_groups,
+        |g| matches!(g.vat_category.as_str(), "E" | "Z" | "O"),
+        &mut r26_1_base,
+        &mut _r26_1_vat,
+    );
+
     // ── Wave 8: R16 regularizări colectată + R30 regularizări dedusă ──────────
     // Override from submission if provided; otherwise use auto-computed prefill
     // values from `report.reg_colectata_*` / `report.reg_dedusa_*`.
@@ -920,6 +977,8 @@ pub fn map_to_rows(
     let r30_1_v = opt_nonzero(r30_1_val);
     let r30_2_v = opt_nonzero(r30_2_val);
     let r31_2_v = opt_nonzero(round_to_lei(r31_2_dec));
+    // Wave 5 FIX 2: R26_1 (rd.28) — achiziții scutite/neimpozabile E/Z/O, bază-only.
+    let r26_1_v = opt_nonzero(round_to_lei(r26_1_base));
     let r27_1_v = opt_nonzero(round_to_lei(r27_base));
     let r27_2_v = opt_nonzero(round_to_lei(r27_vat));
     let r28_2_v = opt_nonzero(round_to_lei(r28_vat));
@@ -941,13 +1000,15 @@ pub fn map_to_rows(
     // Wave 8: include R16_* and R30_* in the control sum.
     // Wave 3 audit FIX 1: include R3_1/R3_1_1/R14_1/R15_1 in the control sum
     // (R3_1/R3_1_1 are always None/0 today but are included for completeness).
+    // Wave 5 FIX 2: include R26_1 (câmpul 99 ∈ suma(câmp 27–124) per structura PDF poz. 26).
     let total_plata_a: i64 = [
         r1_1_v, r3_1_v, r3_1_1_v, r14_1_v, r15_1_v, r5_1_v, r5_2_v, r7_1_v, r7_2_v, r7_1_1_v,
         r7_1_2_v, r9_1_v, r9_2_v, r10_1_v, r10_2_v, r11_1_v, r11_2_v, r12_1_v, r12_2_v, r12_1_1_v,
         r12_1_2_v, r12_2_1_v, r12_2_2_v, r13_1_v, r16_1_v, r16_2_v, r18_1_v, r18_2_v, r17_1_v,
         r17_2_v, r20_1_v, r20_2_v, r20_1_1_v, r20_1_2_v, r22_1_v, r22_2_v, r23_1_v, r23_2_v,
-        r25_1_v, r25_2_v, r25_1_1_v, r25_1_2_v, r25_2_1_v, r25_2_2_v, r27_1_v, r27_2_v, r28_2_v,
-        r30_1_v, r30_2_v, r31_2_v, r32_2_v, r33_2_v, r34_2_v, r37_2_v, r40_2_v, r41_2_v, r42_2_v,
+        r25_1_v, r25_2_v, r25_1_1_v, r25_1_2_v, r25_2_1_v, r25_2_2_v, r26_1_v, r27_1_v, r27_2_v,
+        r28_2_v, r30_1_v, r30_2_v, r31_2_v, r32_2_v, r33_2_v, r34_2_v, r37_2_v, r40_2_v, r41_2_v,
+        r42_2_v,
     ]
     .iter()
     .map(|o| o.unwrap_or(0))
@@ -1045,6 +1106,8 @@ pub fn map_to_rows(
         r30_2: r30_2_v,
         // R31_2 — ajustări de taxă (art. 305 capital-goods adjustment)
         r31_2: r31_2_v,
+        // R26_1 — achiziții scutite/neimpozabile E/Z/O (rd.28, Wave 5 FIX 2)
+        r26_1: r26_1_v,
 
         // totals
         r17_1: r17_1_v,
@@ -1415,6 +1478,81 @@ mod tests {
             "R17_1 = R12_1 + R13_1 = 1500 (fără dublare)"
         );
         assert_eq!(rows.r17_2, Some(210), "R17_2 = R12_2");
+    }
+
+    #[test]
+    fn exempt_purchases_route_to_r26_1_not_r27() {
+        // Wave 5 FIX 2: purchases with vat_category E/Z/O (scutite/neimpozabile) →
+        // R26_1 (rd.28 col.1, base only). Verified vs structura_D300_v12.pdf:
+        //   poz. 99  = R26_1 "Achiziţii de bunuri şi servicii scutite de taxă sau
+        //              neimpozabile, din care:"
+        //   poz. 101 = R27_1 TOTAL TAXĂ DEDUCTIBILĂ — R26_1 NOT in the formula
+        //   poz. 26  = totalPlata_A = suma(câmp 27 la 124) — R26_1 (câmp 99) included
+        let report = make_report(
+            vec![],
+            vec![
+                ("0.00", "E", "700.00", "0.00"),
+                ("0.00", "Z", "200.00", "0.00"),
+                ("0.00", "O", "100.00", "0.00"),
+                ("0.21", "S", "1000.00", "210.00"), // control: normal deductible
+            ],
+        );
+        let sub = make_submission();
+        let company = make_company();
+        let period = NaiveDate::from_ymd_opt(2026, 2, 1).unwrap();
+
+        let rows = map_to_rows(&report, &sub, &company, period, 0).expect("map_to_rows");
+
+        assert_eq!(rows.r26_1, Some(1000), "R26_1 = 700 E + 200 Z + 100 O");
+        assert_eq!(rows.r22_1, Some(1000), "R22_1 unaffected (S 21% only)");
+        assert_eq!(
+            rows.r27_1,
+            Some(1000),
+            "R27_1 excludes R26_1 (structura formula)"
+        );
+        assert_eq!(rows.r27_2, Some(210), "R27_2 excludes exempt purchases");
+        // Control sum includes R26_1: recompute without it and check the delta.
+        let report_no_exempt = make_report(vec![], vec![("0.21", "S", "1000.00", "210.00")]);
+        let rows_no_exempt =
+            map_to_rows(&report_no_exempt, &sub, &company, period, 0).expect("map_to_rows");
+        assert_eq!(
+            rows.total_plata_a - rows_no_exempt.total_plata_a,
+            1000,
+            "totalPlata_A must include R26_1 (câmp 99 ∈ suma câmp 27–124)"
+        );
+    }
+
+    #[test]
+    fn luna_derived_from_tip_decont() {
+        // Wave 5 FIX 1: `luna` = LAST month of the reporting period, per structura
+        // D300 v12 câmp 18: T → luna ∈ (03,06,09,12) standard; S → (06,12); A → 12.
+        let report = make_report(vec![("0.21", "S", "100.00", "21.00")], vec![]);
+        let company = make_company();
+
+        let mut sub = make_submission();
+        let cases = [
+            ("L", 5, 5),   // monthly: unchanged
+            ("T", 4, 6),   // Apr → Q2 → luna 6
+            ("T", 10, 12), // Oct → Q4 → luna 12
+            ("S", 1, 6),   // Jan → S1 → luna 6
+            ("S", 7, 12),  // Jul → S2 → luna 12
+            ("A", 1, 12),  // annual → luna 12
+        ];
+        for (tip, start_month, expected_luna) in cases {
+            sub.tip_decont = tip.to_string();
+            let period = NaiveDate::from_ymd_opt(2026, start_month, 1).unwrap();
+            let rows = map_to_rows(&report, &sub, &company, period, 0).expect("map_to_rows");
+            assert_eq!(
+                rows.luna, expected_luna,
+                "tip_decont={tip} period_from month={start_month} → luna={expected_luna}"
+            );
+            // The generated NDP embeds the same reporting month (positions 7-8).
+            assert_eq!(
+                &rows.nr_evid[7..9],
+                format!("{expected_luna:02}").as_str(),
+                "NDP reporting month must match the derived luna (tip {tip})"
+            );
+        }
     }
 
     #[test]

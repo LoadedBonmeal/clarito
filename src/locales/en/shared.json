@@ -215,6 +215,7 @@
       "firstName": "Declarant first name",
       "role": "Declarant position",
       "tipDecont": "Return type",
+      "declaredPeriod": "Declared period: {{from}} – {{to}}",
       "bank": "Bank",
       "iban": "IBAN account",
       "temei": "Legal basis",

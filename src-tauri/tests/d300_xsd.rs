@@ -1445,3 +1445,150 @@ fn d300_wave8_override() {
         Err(e) => eprintln!("SKIP DUK Wave8 override: {e}"),
     }
 }
+
+/// WAVE 5 FIX 1 SCENARIO: QUARTERLY decont (tip_decont=T) over a full calendar
+/// quarter of mixed data.
+///
+/// VERIFY-FIRST (structura_D300_v12.pdf câmp 18 + câmp 2): for tip_decont=T the
+/// `luna` attribute must carry the LAST month of the quarter (standard set
+/// 03/06/09/12; DUK: "tip_decont=T si luna # (02,03,05,06,08,09,11,12)" = error).
+/// Period = 2026-04-01..2026-06-30 (Q2) → luna="6", an="2026".
+///
+/// Also exercises Wave 5 FIX 2 in the same document: an exempt purchase (E) lands
+/// on R26_1 (rd.28, base-only, in the control sum, NOT in R27).
+/// Must pass XSD AND DUK ("Validare fara erori").
+#[test]
+fn d300_wave5_quarterly_decont_luna_quarter_end() {
+    let xsd_path = std::path::Path::new("tools/anaf/sample_d300_v12.xml");
+    if !xsd_path.exists() {
+        eprintln!("SKIP: XSD not found");
+        return;
+    }
+    if !efactura_desktop_lib::anaf_decl::validation::xmllint_available() {
+        eprintln!("SKIP: xmllint not available");
+        return;
+    }
+
+    // period = period_from of the WIDENED range the UI sends for T (first day of Q2).
+    let period = chrono::NaiveDate::from_ymd_opt(2026, 4, 1).expect("date");
+    let ver = resolve(DeclKind::D300, period).expect("version");
+
+    // Mixed data across the 3 months of the quarter (compute_d300 aggregates the whole
+    // range into per-(rate, category) groups — reuse the same group shapes):
+    //   April:  sales S 21% 10000/2100
+    //   May:    sales S 11% 5000/550
+    //   June:   purchases S 21% 8000/1680 + exempt purchase E 1200 (→ R26_1)
+    let report = D300Report {
+        company_cui: "RO12345674".to_string(),
+        period_from: "2026-04-01".to_string(),
+        period_to: "2026-06-30".to_string(),
+        groups: vec![
+            D300Group {
+                vat_rate: "0.21".to_string(),
+                vat_category: "S".to_string(),
+                base: "10000.00".to_string(),
+                vat: "2100.00".to_string(),
+                intra_eu_kind: None,
+            },
+            D300Group {
+                vat_rate: "0.11".to_string(),
+                vat_category: "S".to_string(),
+                base: "5000.00".to_string(),
+                vat: "550.00".to_string(),
+                intra_eu_kind: None,
+            },
+        ],
+        total_base: "15000.00".to_string(),
+        total_vat: "2650.00".to_string(),
+        invoice_count: 9,
+        purchase_groups: vec![
+            D300Group {
+                vat_rate: "0.21".to_string(),
+                vat_category: "S".to_string(),
+                base: "8000.00".to_string(),
+                vat: "1680.00".to_string(),
+                intra_eu_kind: None,
+            },
+            D300Group {
+                vat_rate: "0.00".to_string(),
+                vat_category: "E".to_string(),
+                base: "1200.00".to_string(),
+                vat: "0.00".to_string(),
+                intra_eu_kind: None,
+            },
+        ],
+        total_deductible_base: "9200.00".to_string(),
+        total_deductible_vat: "1680.00".to_string(),
+        purchase_invoice_count: 5,
+        purchase_unparsed_count: 0,
+        net_vat: "970.00".to_string(),
+        reg_colectata_baza: "0.00".to_string(),
+        reg_colectata_tva: "0.00".to_string(),
+        reg_dedusa_baza: "0.00".to_string(),
+        reg_dedusa_tva: "0.00".to_string(),
+        cash_vat_memo: Default::default(),
+    };
+
+    let mut submission = test_submission();
+    submission.tip_decont = "T".to_string();
+
+    let rows = map_to_rows(&report, &submission, &test_company(), period, 0).expect("map_to_rows");
+
+    // FIX 1: luna = quarter-end month (6), NOT the range's first month (4).
+    assert_eq!(rows.luna, 6, "T over Q2 → luna = 6 (quarter-end month)");
+    assert_eq!(rows.an, 2026);
+    assert_eq!(rows.tip_decont, "T");
+    // The auto-generated NDP embeds obligation code 302 (trimestrial) + luna 06.
+    assert!(
+        rows.nr_evid.starts_with("1030201" /* 10 + 302 + 01 */),
+        "NDP must use the quarterly obligation code 302, got {}",
+        rows.nr_evid
+    );
+    assert_eq!(&rows.nr_evid[7..9], "06", "NDP reporting month = 06");
+
+    // FIX 2: exempt purchase E → R26_1 (base-only), excluded from R27.
+    assert_eq!(rows.r26_1, Some(1200), "E purchase 1200 → R26_1");
+    assert_eq!(rows.r27_1, Some(8000), "R27_1 excludes R26_1");
+    assert_eq!(rows.r27_2, Some(1680), "R27_2 excludes exempt purchases");
+
+    let xml = generate_d300_xml(&rows, &ver).expect("generate");
+    eprintln!("Wave5 quarterly XML:\n{xml}");
+
+    assert!(xml.contains("luna=\"6\""), "XML luna must be 6");
+    assert!(xml.contains("tip_decont=\"T\""), "XML tip_decont must be T");
+    assert!(xml.contains("R26_1=\"1200\""), "XML must carry R26_1=1200");
+
+    if let Ok(dump_dir) = std::env::var("EFACTURA_DUMP_DIR") {
+        let path = std::path::Path::new(&dump_dir).join("d300_wave5_quarterly.xml");
+        std::fs::write(&path, xml.as_bytes()).expect("write dump");
+        eprintln!("DUMP: wave5 quarterly → {:?}", path);
+    }
+
+    // XSD validation
+    let tmp = std::env::temp_dir().join("d300_wave5_quarterly.xml");
+    std::fs::write(&tmp, xml.as_bytes()).expect("write tmp");
+    let xsd_result = efactura_desktop_lib::anaf_decl::validation::validate_with_xsd(xsd_path, &tmp)
+        .expect("xmllint");
+    if !xsd_result.passed {
+        for e in &xsd_result.errors {
+            eprintln!("XSD error: {e}");
+        }
+    }
+    assert!(
+        xsd_result.passed,
+        "Wave5 quarterly must pass XSD: {:?}",
+        xsd_result.errors
+    );
+    let _ = std::fs::remove_file(&tmp);
+
+    // DUK validation — the authoritative check for the tip_decont/luna correlation
+    // rule ("tip_decont=T si luna # (02,03,05,06,08,09,11,12)") and for R26_1's
+    // membership in the totalPlata_A control sum.
+    match run_duk(&xml, "wave5_quarterly") {
+        Ok(passed) => assert!(
+            passed,
+            "Wave5 quarterly: DUK must say 'Validare fara erori'"
+        ),
+        Err(e) => eprintln!("SKIP DUK Wave5 quarterly: {e}"),
+    }
+}

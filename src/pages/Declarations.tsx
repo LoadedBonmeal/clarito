@@ -22,7 +22,7 @@ import { openPath } from "@tauri-apps/plugin-opener";
 import { Ic } from "@/components/shared/Ic";
 import { MonthPicker } from "@/components/shared/MonthPicker";
 import { PreflightPanel } from "@/components/shared/PreflightPanel";
-import { D300SubmissionModal } from "@/components/modals/D300SubmissionModal";
+import { D300SubmissionModal, d300PeriodRange } from "@/components/modals/D300SubmissionModal";
 import { useOpenXml } from "@/hooks/use-open-xml";
 import { api } from "@/lib/tauri";
 import { useAppStore } from "@/lib/store";
@@ -240,12 +240,18 @@ export function DeclarationsPage() {
   };
 
   // ── Exportă D300 oficial ANAF (schema v12) ────────────────────────────────
+  // Wave 5 FIX 1: perioada exportată se lărgește după tip_decont (T → trimestrul
+  // calendaristic care conține luna selectată, S → semestrul, A → anul; L → luna).
+  // Structura D300 v12: atributul `luna` = ULTIMA lună a perioadei (backend-ul o
+  // derivă din tip_decont în map_to_rows); numele fișierului folosește acea lună.
   const handleExportOfficial = async (submission: D300Submission, override = false) => {
     if (!activeCompanyId) { notify.warn(t("declarations.notify.selectCompany")); return; }
     setLastSubmission(submission);
+    const { dateFrom: exportFrom, dateTo: exportTo } =
+      d300PeriodRange(selectedYear, selectedMonth, submission.tipDecont);
     const savePath = await saveDialog({
       title:       t("declarations.dialogs.saveD300Official"),
-      defaultPath: `d300-${selectedYear}-${String(selectedMonth).padStart(2, "0")}.xml`,
+      defaultPath: `d300-${exportTo.slice(0, 7)}.xml`,
       filters:     [{ name: "XML", extensions: ["xml"] }],
     });
     if (!savePath) return;
@@ -266,8 +272,8 @@ export function DeclarationsPage() {
       };
       const res = await api.declarations.exportD300Official(
         activeCompanyId,
-        dateFrom,
-        dateTo,
+        exportFrom,
+        exportTo,
         savePath,
         submissionWithReg,
         override,
@@ -298,6 +304,9 @@ export function DeclarationsPage() {
     if (!activeCompanyId) { notify.warn(t("declarations.notify.selectCompany")); return; }
     setLastSubmission(submission);
     setPreviewingD300(true);
+    // Wave 5 FIX 1: aceeași lărgire de perioadă ca la exportul oficial.
+    const { dateFrom: previewFrom, dateTo: previewTo } =
+      d300PeriodRange(selectedYear, selectedMonth, submission.tipDecont);
     try {
       // Wave 8: aplică regularizările (R16/R30) ca la exportul oficial — doar valorile ne-nule.
       const regCB = Math.round(parseDec(regColectataBaza));
@@ -311,10 +320,10 @@ export function DeclarationsPage() {
         regDedusaBaza:    regDB !== 0 ? regDB : null,
         regDedusaTva:     regDT !== 0 ? regDT : null,
       };
-      const xml = await api.declarations.previewD300Xml(activeCompanyId, dateFrom, dateTo, submissionWithReg);
+      const xml = await api.declarations.previewD300Xml(activeCompanyId, previewFrom, previewTo, submissionWithReg);
       openXml({
         xml,
-        name: `d300-${selectedYear}-${String(selectedMonth).padStart(2, "0")}.xml`,
+        name: `d300-${previewTo.slice(0, 7)}.xml`,
         declKind: "D300",
       });
     } catch (err) {
@@ -1274,6 +1283,8 @@ export function DeclarationsPage() {
           open={showD300Modal}
           onOpenChange={setShowD300Modal}
           company={activeCompany}
+          year={selectedYear}
+          month={selectedMonth}
           onSubmit={(sub) => void handleExportOfficial(sub)}
           onPreview={(sub) => void handlePreviewD300(sub)}
         />

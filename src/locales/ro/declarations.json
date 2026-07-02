@@ -241,7 +241,7 @@
       "dropped_one": "operațiune intra-UE a fost ignorată",
       "dropped_few": "operațiuni intra-UE au fost ignorate",
       "dropped_other": "de operațiuni intra-UE au fost ignorate",
-      "droppedRest": "— partener fără cod TVA UE valid (cod lipsă / prefix non-UE) sau bază netă negativă (stornare peste altă perioadă — regularizarea «R» se declară manual; tipurile T/triunghiular și R nu sunt încă generate automat). Completați CUI-ul partenerului sau declarați regularizarea manual pentru a evita sub-raportarea în VIES.",
+      "droppedRest": "— partener fără cod TVA UE valid (cod lipsă / prefix non-UE) sau bază netă negativă (stornare peste altă perioadă — D390 nu are rând de regularizare: corecția se face printr-o D390 RECTIFICATIVĂ depusă pentru perioada facturii inițiale; tipurile T/triunghiular și R/regim agricultori nu sunt încă generate automat). Completați CUI-ul partenerului sau depuneți rectificativa pentru a evita sub-raportarea în VIES.",
       "headers": {
         "type": "Tip",
         "country": "Țară",

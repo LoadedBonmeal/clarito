@@ -1221,9 +1221,20 @@ pub(crate) async fn compute_plafon_status(
 /// Closing TVA-neexigibilă (4428) memo balances for the informational D300 rows A/A1/B/B1.
 /// Splits the 4428 GL entries by side — output (sales: `journal_type='SALES'`, or a `'PAYMENT'`
 /// journal carrying a customer = a sales collection) vs input (purchases) — nets the still-deferred
-/// VAT as of `period_to`, and derives the base from each entry's rate (`tax_percentage`). A1/B1 keep
-/// only the slice from the reporting period + the prior 5 months. Purely informational: never feeds
-/// any total (OPANAF 174/2026).
+/// VAT as of `period_to`, and derives the base from each entry's rate (`tax_percentage`).
+///
+/// A1/B1 (Wave 5 FIX 4) — structura D300 v12 câmp 128/130/132/134: livrări/achiziții
+/// „efectuate în ultimele 6 luni/2 trimestre calendaristice". The window membership is
+/// therefore keyed to the SOURCE INVOICE's issue date (when the operation was performed),
+/// not to the GL entry date: each 4428 entry is joined back to its source invoice
+/// (SALES→invoices, PAYMENT→payments→invoices, PURCHASE→received_invoices,
+/// RECEIVED_PAYMENT→received_invoice_payments→received_invoices) and BOTH the accumulation
+/// and the release entries count toward A1/B1 iff that invoice was issued inside the
+/// window. Previously a release inside the window for a PRE-window invoice wrongly
+/// reduced the aged balance. The window itself = the 6 months ending with the LAST month
+/// of the reporting period (monthly: month + prior 5; quarterly: the quarter + the prior
+/// quarter = 2 calendar quarters, art. 282(5)). Purely informational: never feeds any
+/// total (OPANAF 174/2026).
 #[allow(clippy::type_complexity)]
 async fn cash_vat_memo_balances(
     pool: &sqlx::SqlitePool,
@@ -1234,20 +1245,30 @@ async fn cash_vat_memo_balances(
     use rust_decimal::Decimal;
     use std::str::FromStr;
 
-    // A1/B1 window: reporting period + the prior 5 months (monthly fiscal period).
+    // A1/B1 window: the 6 months ending with the LAST month of the reporting period
+    // („ultimele 6 luni/2 trimestre calendaristice" — structura D300 v12 câmp 128/130/
+    // 132/134). Derived from period_TO so it stays correct for the tip_decont-widened
+    // periods (Wave 5 FIX 1): monthly → month + prior 5; quarterly → the reporting
+    // quarter + the prior quarter (= 2 calendar quarters, art. 282(5)). For a monthly
+    // period (from-month == to-month) this is identical to the old period_from formula.
     let aging_from = {
-        let y: i32 = period_from
+        let y: i32 = period_to
             .get(0..4)
             .and_then(|s| s.parse().ok())
             .unwrap_or(2026);
-        let m: i32 = period_from
+        let m: i32 = period_to
             .get(5..7)
             .and_then(|s| s.parse().ok())
             .unwrap_or(1);
         let t = y * 12 + (m - 1) - 5;
         format!("{:04}-{:02}-01", t / 12, t % 12 + 1)
     };
+    let _ = period_from; // window is anchored on period_to (see above)
 
+    // Wave 5 FIX 4: A1/B1 membership is keyed to the SOURCE INVOICE issue date — join
+    // each 4428 entry back to its source document (falling back to the journal date when
+    // the source can't be resolved, e.g. legacy/manual journals), so that a release
+    // entry inside the window for a pre-window invoice no longer erodes A1/B1.
     let rows: Vec<(
         String,
         Option<String>,
@@ -1257,9 +1278,19 @@ async fn cash_vat_memo_balances(
         String,
         Option<String>,
     )> = sqlx::query_as(
-        "SELECT j.journal_type, j.customer_id, j.supplier_id, j.transaction_date, \
+        "SELECT j.journal_type, j.customer_id, j.supplier_id, \
+                COALESCE(si.issue_date, pi.issue_date, ri.issue_date, rpi.issue_date, \
+                         j.transaction_date) AS src_date, \
                 e.debit, e.credit, e.tax_percentage \
          FROM gl_entry e JOIN gl_journal j ON j.id = e.journal_pk \
+         LEFT JOIN invoices si ON j.source_type = 'INVOICE' AND si.id = j.source_id \
+         LEFT JOIN payments p ON j.source_type = 'PAYMENT' AND p.id = j.source_id \
+         LEFT JOIN invoices pi ON pi.id = p.invoice_id \
+         LEFT JOIN received_invoices ri \
+                ON j.source_type = 'RECEIVED_INVOICE' AND ri.id = j.source_id \
+         LEFT JOIN received_invoice_payments rp \
+                ON j.source_type = 'RECEIVED_PAYMENT' AND rp.id = j.source_id \
+         LEFT JOIN received_invoices rpi ON rpi.id = rp.received_invoice_id \
          WHERE j.company_id = ?1 AND e.account_code = '4428' AND j.transaction_date <= ?2",
     )
     .bind(company_id)
@@ -1272,7 +1303,7 @@ async fn cash_vat_memo_balances(
     let (mut b_vat, mut b_base, mut b1_vat, mut b1_base) =
         (Decimal::ZERO, Decimal::ZERO, Decimal::ZERO, Decimal::ZERO);
 
-    for (jt, cust, supp, date, debit, credit, rate_s) in &rows {
+    for (jt, cust, supp, src_date, debit, credit, rate_s) in &rows {
         let rate = rate_s
             .as_deref()
             .and_then(|s| Decimal::from_str(s).ok())
@@ -1293,7 +1324,9 @@ async fn cash_vat_memo_balances(
             continue;
         };
         let base = signed_vat * Decimal::from(100) / rate; // base = VAT / (rate%/100)
-        let in_aging = date.as_str() >= aging_from.as_str();
+                                                           // In-window iff the SOURCE INVOICE was issued inside the window (both the
+                                                           // accumulation and its releases follow the invoice — Wave 5 FIX 4).
+        let in_aging = src_date.as_str() >= aging_from.as_str();
         if is_output {
             a_vat += signed_vat;
             a_base += base;
@@ -2896,6 +2929,8 @@ mod cash_vat_routing_tests {
     }
 
     /// Insert a raw 4428 (TVA neexigibilă) GL entry for the memo-balance test.
+    /// Source is unresolvable (source_type = journal_type) → the fn falls back to the
+    /// journal transaction_date for the A1/B1 window (legacy/manual-journal path).
     #[allow(clippy::too_many_arguments)]
     async fn insert_4428(
         pool: &SqlitePool,
@@ -2906,17 +2941,51 @@ mod cash_vat_routing_tests {
         credit: &str,
         rate: &str,
     ) {
+        insert_4428_src(
+            pool,
+            company,
+            jtype,
+            date,
+            debit,
+            credit,
+            rate,
+            jtype,
+            &crate::db::models::new_id(),
+            None,
+        )
+        .await;
+    }
+
+    /// Insert a 4428 GL entry with an explicit source (real posting shape:
+    /// SALES→INVOICE, PAYMENT→PAYMENT, etc.) so the memo fn can resolve the
+    /// source-invoice issue date (Wave 5 FIX 4).
+    #[allow(clippy::too_many_arguments)]
+    async fn insert_4428_src(
+        pool: &SqlitePool,
+        company: &str,
+        jtype: &str,
+        date: &str,
+        debit: &str,
+        credit: &str,
+        rate: &str,
+        source_type: &str,
+        source_id: &str,
+        customer_id: Option<&str>,
+    ) {
         let jid = crate::db::models::new_id();
         sqlx::query(
             "INSERT INTO gl_journal (id, company_id, journal_id, journal_type, transaction_id, \
              transaction_date, description, source_type, source_id, customer_id, supplier_id) \
-             VALUES (?1,?2,'X',?3,?4,?5,'t',?3,?4,NULL,NULL)",
+             VALUES (?1,?2,'X',?3,?4,?5,'t',?6,?7,?8,NULL)",
         )
         .bind(&jid)
         .bind(company)
         .bind(jtype)
         .bind(crate::db::models::new_id())
         .bind(date)
+        .bind(source_type)
+        .bind(source_id)
+        .bind(customer_id)
         .execute(pool)
         .await
         .unwrap();
@@ -2981,6 +3050,71 @@ mod cash_vat_routing_tests {
         assert_eq!(m.b_vat, 21);
         assert_eq!(m.b_base, 100);
         assert_eq!(m.b1_vat, 21);
+    }
+
+    /// Wave 5 FIX 4: an in-window RELEASE (collection) of a PRE-window invoice must NOT
+    /// erode A1 — window membership follows the SOURCE INVOICE's issue date for both the
+    /// accumulation and the release legs (structura D300 v12 câmp 128: livrări
+    /// „efectuate în ultimele 6 luni/2 trimestre").
+    #[tokio::test]
+    async fn cash_vat_memo_a1_ignores_release_of_pre_window_invoice() {
+        let pool = pool().await;
+        seed_company(&pool, "co", true, Some("2025-01-01")).await;
+
+        // Pre-window invoice (issued 2025-11-15; the Jun-2026 window starts 2026-01-01):
+        // accumulation C 4428 = 210 posted at issue (SALES journal, source INVOICE).
+        seed_invoice(&pool, "co", "inv-old", "2025-11-15", "1000", "210", "1210").await;
+        insert_4428_src(
+            &pool,
+            "co",
+            "SALES",
+            "2025-11-15",
+            "0.00",
+            "210.00",
+            "21.00",
+            "INVOICE",
+            "inv-old",
+            Some("c-co"),
+        )
+        .await;
+        // Partial collection in June 2026 → release D 4428 = 105 (PAYMENT journal,
+        // source PAYMENT → payments.invoice_id = inv-old). Journal date IS in-window,
+        // but the source invoice is pre-window → must stay OUT of A1.
+        seed_payment(&pool, "co", "inv-old", "p-old", "605", "2026-06-20").await;
+        insert_4428_src(
+            &pool,
+            "co",
+            "PAYMENT",
+            "2026-06-20",
+            "105.00",
+            "0.00",
+            "21.00",
+            "PAYMENT",
+            "p-old",
+            Some("c-co"),
+        )
+        .await;
+        // In-window accumulation (unresolvable source → journal-date fallback): C 4428 = 300.
+        insert_4428(
+            &pool,
+            "co",
+            "SALES",
+            "2026-06-05",
+            "0.00",
+            "300.00",
+            "21.00",
+        )
+        .await;
+
+        let m = cash_vat_memo_balances(&pool, "co", "2026-06-01", "2026-06-30")
+            .await
+            .unwrap();
+        // Closing balance A: 210 - 105 + 300 = 405 (release always nets the total).
+        assert_eq!(m.a_vat, 405);
+        // A1: ONLY the in-window invoice's slice — the pre-window invoice's accumulation
+        // AND its in-window release are both excluded. (Old bug: A1 = 300 - 105 = 195.)
+        assert_eq!(m.a1_vat, 300);
+        assert_eq!(m.a1_base, 1429); // 300 / 21% = 1428.57 → 1429 lei (commercial rounding)
     }
 
     async fn seed_company(pool: &SqlitePool, id: &str, cash_vat: bool, start: Option<&str>) {

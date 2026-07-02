@@ -237,7 +237,7 @@
       },
       "dropped_one": "intra-EU operation was ignored",
       "dropped_other": "intra-EU operations were ignored",
-      "droppedRest": "— partner without a valid EU VAT code (missing code / non-EU prefix) or negative net base (credit note across another period — the «R» adjustment is declared manually; the T/triangular and R types are not yet generated automatically). Fill in the partner's CUI or declare the adjustment manually to avoid under-reporting in VIES.",
+      "droppedRest": "— partner without a valid EU VAT code (missing code / non-EU prefix) or negative net base (credit note across another period — D390 has no regularization row: the correction is a RECTIFICATIVE D390 filed for the original invoice's period; the T/triangular and R/farmers-scheme types are not yet generated automatically). Fill in the partner's CUI or file the rectificative return to avoid under-reporting in VIES.",
       "headers": {
         "type": "Type",
         "country": "Country",

@@ -220,6 +220,7 @@
       "firstName": "Prenume declarant",
       "role": "Funcție declarant",
       "tipDecont": "Tip decont",
+      "declaredPeriod": "Perioada declarată: {{from}} – {{to}}",
       "bank": "Bancă",
       "iban": "Cont IBAN",
       "temei": "Temei legal",

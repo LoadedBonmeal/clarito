@@ -152,9 +152,14 @@ pub(crate) async fn compute_d390_doc(
     }
 
     // Build ops (baza în lei întregi, rotunjire comercială), ordered. O bază NETĂ NEGATIVĂ pe
-    // partener (stornare peste altă perioadă) nu poate fi reprezentată pe rândurile L/T/A/P/S —
-    // ar aparține regularizărilor (R, neimplementat) — deci se exclude cu avertisment și se
-    // numără la `dropped`, ca utilizatorul să o declare manual. Bazele netate la 0 dispar firesc.
+    // partener (stornare peste altă perioadă) nu poate fi reprezentată pe rândurile L/T/A/P/S,
+    // iar D390 NU are un rând de regularizare: tipul «R» este regimul special pentru AGRICULTORI
+    // (OPANAF 705/2020; vezi anaf_decl/d390/mod.rs), nu o regularizare — Wave 5 FIX 3 (v0.7.4
+    // audit) a corectat vechiul avertisment care trimitea la un rând «R = regularizare»
+    // inexistent. Corecția legală = D390 RECTIFICATIVĂ (atributul d_rec) depusă pentru perioada
+    // facturii inițiale. Partenerul negativ se exclude deci cu avertisment și se numără la
+    // `dropped` (D390Doc.dropped → banner-ul din D390View), ca utilizatorul să depună
+    // rectificativa. Bazele netate la 0 dispar firesc.
     let mut negative_partners = 0i64;
     let operations: Vec<D390Op> = agg
         .into_iter()
@@ -172,8 +177,9 @@ pub(crate) async fn compute_d390_doc(
             if o.baza < 0 {
                 tracing::warn!(
                     tip = %o.tip, partener = %o.den_o, baza = o.baza,
-                    "D390: bază netă negativă (stornare peste perioadă) — exclusă; declarați \
-                     regularizarea (R) manual"
+                    "D390: bază netă negativă (stornare peste altă perioadă) — exclusă din \
+                     decontul curent; depuneți o D390 rectificativă (d_rec) pentru perioada \
+                     facturii inițiale"
                 );
                 negative_partners += 1;
                 return false;
@@ -349,7 +355,9 @@ mod tests {
         .unwrap();
         // A storno credit note (storno_of_invoice_id set) to a valid DE customer — INCLUDED in the
         // fiscal set (D300 parity); its partner nets −500 with no original in-period → the negative
-        // net cannot sit on L/P rows → dropped with a warning (R-row regularization is manual).
+        // net cannot sit on L/P rows → dropped with a warning (the legal correction is a
+        // rectificative D390 / d_rec for the original invoice's period — tip «R» is the farmers'
+        // special regime, NOT a regularization row).
         sqlx::query(
             "INSERT INTO contacts (id, company_id, contact_type, cui, legal_name) \
              VALUES ('ct2','co','CUSTOMER','DE999','Kunde2')",

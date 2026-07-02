@@ -15,12 +15,60 @@ import { Ic } from "@/components/shared/Ic";
 import { useAnimatedClose } from "@/hooks/use-animated-close";
 import type { Company, D300Submission } from "@/types";
 
+// ── Period helpers (Wave 5 FIX 1) ─────────────────────────────────────────────
+
+/**
+ * Perioada efectiv declarată pentru un (an, lună selectată, tip_decont).
+ *
+ * VERIFY-FIRST — structura_D300_v12.pdf, câmp 18 (tip_decont) + câmp 2 (luna):
+ * atributul `luna` din XML poartă ULTIMA lună a perioadei (T → 03/06/09/12,
+ * S → 06/12, A → 12), iar decontul acoperă întreaga perioadă calendaristică.
+ * Deci: T → trimestrul calendaristic care conține luna selectată, S → semestrul,
+ * A → anul întreg, L → luna (nemodificat).
+ */
+export function d300PeriodRange(
+  year: number,
+  month: number,
+  tipDecont: string,
+): { dateFrom: string; dateTo: string } {
+  let mFrom = month;
+  let mTo = month;
+  switch (tipDecont) {
+    case "T":
+      mFrom = Math.floor((month - 1) / 3) * 3 + 1;
+      mTo = mFrom + 2;
+      break;
+    case "S":
+      mFrom = month <= 6 ? 1 : 7;
+      mTo = mFrom + 5;
+      break;
+    case "A":
+      mFrom = 1;
+      mTo = 12;
+      break;
+  }
+  const lastDay = new Date(year, mTo, 0).getDate();
+  return {
+    dateFrom: `${year}-${String(mFrom).padStart(2, "0")}-01`,
+    dateTo: `${year}-${String(mTo).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`,
+  };
+}
+
+/** ISO yyyy-mm-dd → dd.mm.yyyy (afișare). */
+const fmtDot = (iso: string) => {
+  const [y, m, d] = iso.split("-");
+  return `${d}.${m}.${y}`;
+};
+
 // ── Props ─────────────────────────────────────────────────────────────────────
 
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   company: Company;
+  /** Perioada selectată în pagina Declarații — folosită pentru afișarea perioadei declarate. */
+  year: number;
+  month: number;
   onSubmit: (submission: D300Submission) => void;
   /** Optional: deschide XML-ul D300 în vizualizatorul/editorul din aplicație (fără scriere pe disc). */
   onPreview?: (submission: D300Submission) => void;
@@ -63,7 +111,7 @@ function CheckRow({
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export function D300SubmissionModal({ open, onOpenChange, company, onSubmit, onPreview }: Props) {
+export function D300SubmissionModal({ open, onOpenChange, company, year, month, onSubmit, onPreview }: Props) {
   const { t } = useTranslation();
   const tipDecontOptions = [
     { value: "L", label: t("shared.declCommon.periodL") },
@@ -223,6 +271,17 @@ export function D300SubmissionModal({ open, onOpenChange, company, onSubmit, onP
                   <option key={o.value} value={o.value}>{o.label}</option>
                 ))}
               </select>
+              {/* Wave 5 FIX 1: perioada efectiv declarată (lărgită după tip_decont) —
+                  contabilul vede exact ce interval intră în decont. */}
+              <span className="hint" data-testid="d300-declared-period">
+                {(() => {
+                  const r = d300PeriodRange(year, month, tipDecont);
+                  return t("shared.d300.declaredPeriod", {
+                    from: fmtDot(r.dateFrom),
+                    to: fmtDot(r.dateTo),
+                  });
+                })()}
+              </span>
             </div>
 
             {/* Bancă */}
