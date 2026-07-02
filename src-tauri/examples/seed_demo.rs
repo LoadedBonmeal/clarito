@@ -337,6 +337,7 @@ async fn seed_firm(
         pool,
         DividendInput {
             company_id: cid.clone(),
+            exempt_art43_4: false,
             distribution_date: "2026-03-15".into(),
             payment_date: Some("2026-03-25".into()),
             gross_amount: "40000".into(),
@@ -355,6 +356,7 @@ async fn seed_firm(
         pool,
         DividendInput {
             company_id: cid.clone(),
+            exempt_art43_4: false,
             distribution_date: "2026-04-10".into(),
             payment_date: Some("2026-04-20".into()),
             gross_amount: "15000".into(),

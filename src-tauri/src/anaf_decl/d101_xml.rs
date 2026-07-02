@@ -14,6 +14,7 @@
 //!   - `d_recN` are interval FIX [1,1] (0 și 2 sunt respinse: „nu se incadreaza in intervalul cerut");
 //!   - regula R2a: „d_rec(x) =2 daca d_recN (1) =1" → d_rec=0 și d_rec=1 sunt RESPINSE,
 //!     d_rec=3 e în afara intervalului; SINGURA combinație validă e `d_rec=2, d_recN=1`.
+//!
 //! Deci pentru an ≥ 2024 atributul XML `d_rec` este o CONSTANTĂ STRUCTURALĂ a dicționarului și
 //! NU mai codifică statutul de rectificativă. Rectificativa NU se poate semnala prin acest câmp;
 //! evidența „originală vs. rectificativă" trebuie purtată separat (vezi

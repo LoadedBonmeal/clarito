@@ -19,7 +19,6 @@
 //!   • resolution REVIEW | ERROR | DUP_IN_BATCH → SKIP, left for user.
 //!   • resolution NEW + per-row create fn error → catch, set ERROR, continue.
 
-use rust_decimal::Decimal;
 use tauri::State;
 
 use crate::db::models::{new_id, now_unix, ContactType};

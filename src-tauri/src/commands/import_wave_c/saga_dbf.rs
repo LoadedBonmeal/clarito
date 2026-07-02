@@ -290,6 +290,7 @@ fn record_ro_score(record: &Record) -> Option<usize> {
 /// (0xBA/0xFE) decode as box-drawing junk under CP852, so the wrong candidate scores
 /// strictly lower whenever the text has more than the ambiguous î/ţ (0xEE) overlap.
 /// Returns `None` if the reader can't even be opened under this encoding.
+#[cfg(test)] // production goes through score_candidate_sampled; the tie tests use this shorthand
 fn score_candidate(bytes: &[u8], cp: DbfCodePage) -> Option<usize> {
     score_candidate_sampled(bytes, cp, SAMPLE_SIZE)
 }
