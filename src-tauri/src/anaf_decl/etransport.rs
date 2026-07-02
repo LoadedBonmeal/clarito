@@ -229,27 +229,57 @@ pub fn validate_etransport(d: &EtransportDeclaration) -> Vec<String> {
     if d.transport.nr_vehicul.trim().is_empty() {
         errs.push("Lipsește numărul de înmatriculare al vehiculului.".into());
     }
+    // codTaraOrgTransport + denumireOrgTransport sunt use="required" în DateTransportType
+    // (schema_ETR_v2.xsd) cu minLength=1 — fără ele ANAF respinge declarația la schemă;
+    // semnalăm local, cu mesaj clar, înainte de generare/trimitere.
+    if d.transport.cod_tara_org_transport.trim().is_empty() {
+        errs.push(
+            "Lipsește țara organizatorului transportului (codTaraOrgTransport) — obligatorie \
+             în schema e-Transport."
+                .into(),
+        );
+    }
+    if d.transport.denumire_org_transport.trim().is_empty() {
+        errs.push(
+            "Lipsește denumirea organizatorului transportului (denumireOrgTransport) — \
+             obligatorie în schema e-Transport."
+                .into(),
+        );
+    }
     if d.transport.data_transport.trim().is_empty() {
         errs.push("Lipsește data transportului.".into());
     }
     if d.documents.is_empty() {
         errs.push("Cel puțin un document de transport este obligatoriu.".into());
     }
-    if !route_complete(&d.loc_start) {
-        errs.push(
-            "Locul de plecare incomplet: completați județul + localitatea + strada, sau un punct \
-             de frontieră / birou vamal."
-                .into(),
-        );
-    }
-    if !route_complete(&d.loc_final) {
-        errs.push(
-            "Locul de sosire incomplet: completați județul + localitatea + strada, sau un punct \
-             de frontieră / birou vamal."
-                .into(),
-        );
-    }
+    push_route_errors(&mut errs, &d.loc_start, "plecare");
+    push_route_errors(&mut errs, &d.loc_final, "sosire");
     errs
+}
+
+/// Precise errors for a route endpoint (`nume` = "plecare"/"sosire"). An endpoint is valid as a
+/// border point (codPtf) / customs office (codBirouVamal), otherwise the address form needs
+/// județ + localitate + stradă (denumireStrada e use="required", minLength=1 în LocatieType).
+fn push_route_errors(errs: &mut Vec<String>, loc: &RouteLoc, nume: &str) {
+    if loc.cod_ptf.is_some()
+        || loc
+            .cod_birou_vamal
+            .as_ref()
+            .is_some_and(|s| !s.trim().is_empty())
+    {
+        return;
+    }
+    if loc.cod_judet.is_none() || loc.denumire_localitate.trim().is_empty() {
+        errs.push(format!(
+            "Locul de {nume} incomplet: completați județul + localitatea + strada, sau un punct \
+             de frontieră / birou vamal."
+        ));
+    } else if loc.denumire_strada.trim().is_empty() {
+        errs.push(format!(
+            "Locul de {nume}: lipsește strada (denumireStrada) — obligatorie în schema \
+             e-Transport."
+        ));
+    }
 }
 
 fn dec_attr(v: f64) -> String {
@@ -296,19 +326,6 @@ fn strip_ro(cui: &str) -> String {
         .to_string()
 }
 
-/// Is a route endpoint complete per the schema: a full address (codJudet + localitate) OR a
-/// border-crossing point (codPtf) OR a customs office (codBirouVamal).
-fn route_complete(loc: &RouteLoc) -> bool {
-    loc.cod_ptf.is_some()
-        || loc
-            .cod_birou_vamal
-            .as_ref()
-            .is_some_and(|s| !s.trim().is_empty())
-        || (loc.cod_judet.is_some()
-            && !loc.denumire_localitate.trim().is_empty()
-            && !loc.denumire_strada.trim().is_empty())
-}
-
 fn write_route(
     w: &mut Writer<Cursor<Vec<u8>>>,
     tag: &str,
@@ -328,21 +345,26 @@ fn write_route(
         if let Some(j) = loc.cod_judet {
             l.push_attribute(("codJudet", j.to_string().as_str()));
         }
-        if !loc.denumire_localitate.is_empty() {
+        if !loc.denumire_localitate.trim().is_empty() {
             l.push_attribute((
                 "denumireLocalitate",
-                clean(&loc.denumire_localitate, 200).as_str(),
+                // Str100 în LocatieType (nu Str200) — cap la 100.
+                clean(&loc.denumire_localitate, 100).as_str(),
             ));
         }
-        // denumireStrada is required by LocatieType — always emit (clean cap = Str100 maxLength).
-        l.push_attribute(("denumireStrada", clean(&loc.denumire_strada, 100).as_str()));
-        if !loc.numar.is_empty() {
+        // denumireStrada e use="required" în LocatieType (Str100, minLength=1) —
+        // `validate_etransport` garantează completarea; dacă totuși lipsește, o OMITEM în loc să
+        // emitem denumireStrada="" (o valoare goală încalcă minLength=1 → respingere la schemă).
+        if !loc.denumire_strada.trim().is_empty() {
+            l.push_attribute(("denumireStrada", clean(&loc.denumire_strada, 100).as_str()));
+        }
+        if !loc.numar.trim().is_empty() {
             l.push_attribute(("numar", clean(&loc.numar, 20).as_str()));
         }
-        if !loc.cod_postal.is_empty() {
+        if !loc.cod_postal.trim().is_empty() {
             l.push_attribute(("codPostal", clean(&loc.cod_postal, 10).as_str()));
         }
-        if !loc.alte_info.is_empty() {
+        if !loc.alte_info.trim().is_empty() {
             l.push_attribute(("alteInfo", clean(&loc.alte_info, 200).as_str()));
         }
         w.write_event(Event::Empty(l))?;
@@ -365,7 +387,7 @@ pub fn generate_etransport_xml(d: &EtransportDeclaration) -> AppResult<String> {
         "codDeclarant",
         clean(&strip_ro(&d.cod_declarant), 13).as_str(),
     ));
-    if !d.ref_declarant.is_empty() {
+    if !d.ref_declarant.trim().is_empty() {
         root.push_attribute(("refDeclarant", clean(&d.ref_declarant, 50).as_str()));
     }
     w.write_event(Event::Start(root)).map_err(map)?;
@@ -380,7 +402,7 @@ pub fn generate_etransport_xml(d: &EtransportDeclaration) -> AppResult<String> {
             "codScopOperatiune",
             clean(&g.cod_scop_operatiune, 6).as_str(),
         ));
-        if !g.cod_tarifar.is_empty() {
+        if !g.cod_tarifar.trim().is_empty() {
             e.push_attribute(("codTarifar", clean(&g.cod_tarifar, 8).as_str()));
         }
         e.push_attribute(("denumireMarfa", clean(&g.denumire_marfa, 200).as_str())); // Str200
@@ -401,7 +423,7 @@ pub fn generate_etransport_xml(d: &EtransportDeclaration) -> AppResult<String> {
 
     let mut p = BytesStart::new("partenerComercial");
     p.push_attribute(("codTara", clean(&d.partner.cod_tara, 2).as_str()));
-    if !d.partner.cod.is_empty() {
+    if !d.partner.cod.trim().is_empty() {
         p.push_attribute(("cod", clean(&d.partner.cod, 30).as_str()));
     }
     p.push_attribute(("denumire", clean(&d.partner.denumire, 200).as_str()));
@@ -410,24 +432,31 @@ pub fn generate_etransport_xml(d: &EtransportDeclaration) -> AppResult<String> {
     let t = &d.transport;
     let mut dt = BytesStart::new("dateTransport");
     dt.push_attribute(("nrVehicul", clean(&t.nr_vehicul, 20).as_str()));
-    if !t.nr_remorca1.is_empty() {
+    if !t.nr_remorca1.trim().is_empty() {
         dt.push_attribute(("nrRemorca1", clean(&t.nr_remorca1, 20).as_str()));
     }
-    if !t.nr_remorca2.is_empty() {
+    if !t.nr_remorca2.trim().is_empty() {
         dt.push_attribute(("nrRemorca2", clean(&t.nr_remorca2, 20).as_str()));
     }
-    // codTaraOrgTransport + denumireOrgTransport are required by DateTransportType — always emit.
-    dt.push_attribute((
-        "codTaraOrgTransport",
-        clean(&t.cod_tara_org_transport, 2).as_str(),
-    ));
-    if !t.cod_org_transport.is_empty() {
+    // codTaraOrgTransport + denumireOrgTransport sunt use="required" în DateTransportType
+    // (CodTaraType enum / Str200 minLength=1) — `validate_etransport` garantează completarea;
+    // dacă totuși lipsesc, le OMITEM în loc să emitem atribute goale (o valoare goală încalcă
+    // enum-ul/minLength=1 → respingere la schemă; lipsa atributului dă o eroare XSD mai clară).
+    if !t.cod_tara_org_transport.trim().is_empty() {
+        dt.push_attribute((
+            "codTaraOrgTransport",
+            clean(&t.cod_tara_org_transport, 2).as_str(),
+        ));
+    }
+    if !t.cod_org_transport.trim().is_empty() {
         dt.push_attribute(("codOrgTransport", clean(&t.cod_org_transport, 30).as_str()));
     }
-    dt.push_attribute((
-        "denumireOrgTransport",
-        clean(&t.denumire_org_transport, 200).as_str(),
-    ));
+    if !t.denumire_org_transport.trim().is_empty() {
+        dt.push_attribute((
+            "denumireOrgTransport",
+            clean(&t.denumire_org_transport, 200).as_str(),
+        ));
+    }
     dt.push_attribute(("dataTransport", clean(&t.data_transport, 10).as_str()));
     w.write_event(Event::Empty(dt)).map_err(map)?;
 
@@ -437,10 +466,10 @@ pub fn generate_etransport_xml(d: &EtransportDeclaration) -> AppResult<String> {
     for doc in &d.documents {
         let mut e = BytesStart::new("documenteTransport");
         e.push_attribute(("tipDocument", clean(&doc.tip_document, 4).as_str()));
-        if !doc.numar_document.is_empty() {
+        if !doc.numar_document.trim().is_empty() {
             e.push_attribute(("numarDocument", clean(&doc.numar_document, 50).as_str()));
         }
-        if !doc.data_document.is_empty() {
+        if !doc.data_document.trim().is_empty() {
             e.push_attribute(("dataDocument", clean(&doc.data_document, 10).as_str()));
         }
         w.write_event(Event::Empty(e)).map_err(map)?;
@@ -480,6 +509,8 @@ mod tests {
             },
             transport: Transport {
                 nr_vehicul: "B100ABC".into(),
+                cod_tara_org_transport: "RO".into(),
+                denumire_org_transport: "Transportator SRL".into(),
                 data_transport: "2026-06-10".into(),
                 ..Default::default()
             },
@@ -548,6 +579,58 @@ mod tests {
         assert!(errs.iter().any(|e| e.contains("document")));
     }
 
+    // denumireStrada (LocatieType) + codTaraOrgTransport/denumireOrgTransport (DateTransportType)
+    // are use="required" cu minLength=1 în schema_ETR_v2.xsd — lipsa lor trebuie semnalată LOCAL,
+    // cu mesaje clare, nu descoperită ca respingere de schemă la ANAF.
+    #[test]
+    fn validation_catches_missing_street_and_organizer() {
+        let mut d = sample();
+        d.loc_start.denumire_strada = "  ".into(); // whitespace-only = gol (xs:token collapse)
+        d.transport.cod_tara_org_transport = "".into();
+        d.transport.denumire_org_transport = " ".into();
+        let errs = validate_etransport(&d);
+        assert!(
+            errs.iter()
+                .any(|e| e.contains("Locul de plecare") && e.contains("strada")),
+            "missing start street must be a clear local error, got: {errs:?}"
+        );
+        assert!(
+            errs.iter().any(|e| e.contains("țara organizatorului")),
+            "missing codTaraOrgTransport must be a clear local error, got: {errs:?}"
+        );
+        assert!(
+            errs.iter().any(|e| e.contains("denumirea organizatorului")),
+            "missing denumireOrgTransport must be a clear local error, got: {errs:?}"
+        );
+        // sosirea are strada completată → fără eroare de stradă la sosire
+        assert!(!errs.iter().any(|e| e.contains("Locul de sosire")));
+    }
+
+    // Un atribut pe care XSD-ul îl cere non-gol nu trebuie emis NICIODATĂ cu valoare goală
+    // (minLength=1 / enum) — dacă validarea a fost ocolită, atributul gol se OMITE.
+    #[test]
+    fn empty_required_attrs_are_omitted_not_emitted_empty() {
+        let mut d = sample();
+        d.transport.cod_tara_org_transport = "".into();
+        d.transport.denumire_org_transport = "".into();
+        d.loc_start.denumire_strada = "".into();
+        let xml = generate_etransport_xml(&d).unwrap();
+        assert!(
+            !xml.contains("codTaraOrgTransport"),
+            "empty codTaraOrgTransport must be omitted, got: {xml}"
+        );
+        assert!(
+            !xml.contains("denumireOrgTransport"),
+            "empty denumireOrgTransport must be omitted, got: {xml}"
+        );
+        assert!(
+            !xml.contains("=\"\""),
+            "no attribute may be emitted with an empty value, got: {xml}"
+        );
+        // strada de la sosire (completată) se emite în continuare
+        assert!(xml.contains("denumireStrada=\"Str. B\""));
+    }
+
     // Fast in-lib structural check of the required attributes. The full xmllint round-trip against the
     // OFFICIAL ANAF schema (`schema_ETR_v2.xsd`, namespace `:v2`) is in `tests/etransport_xsd.rs`.
     #[test]
@@ -580,16 +663,18 @@ mod tests {
         assert!(xml.contains("denumire=\"Client SRL\""));
         assert!(xml.contains("nrVehicul=\"B100ABC\""));
         assert!(
-            xml.contains("codTaraOrgTransport="),
+            xml.contains("codTaraOrgTransport=\"RO\""),
             "codTaraOrgTransport required"
         );
         assert!(
-            xml.contains("denumireOrgTransport="),
+            xml.contains("denumireOrgTransport=\"Transportator SRL\""),
             "denumireOrgTransport required"
         );
         assert!(xml.contains("dataTransport=\"2026-06-10\""));
-        // route start as address (locatie), final as address.
+        // route start as address (locatie) incl. required street, final as address.
         assert!(xml.contains("<locStartTraseuRutier><locatie codJudet=\"40\""));
+        assert!(xml.contains("denumireStrada=\"Str. A\""));
+        assert!(xml.contains("denumireStrada=\"Str. B\""));
         assert!(xml.contains("<locFinalTraseuRutier>"));
         assert!(xml.contains("tipDocument=\"20\""));
         assert!(xml.contains("</eTransport>"));

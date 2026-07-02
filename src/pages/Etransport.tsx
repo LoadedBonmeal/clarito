@@ -20,6 +20,7 @@ import { Ic } from "@/components/shared/Ic";
 import { useOneShot } from "@/hooks/use-one-shot";
 import { useOpenXml } from "@/hooks/use-open-xml";
 import { api } from "@/lib/tauri";
+import { COUNTRIES } from "@/lib/constants";
 import { useAppStore } from "@/lib/store";
 import { queryKeys } from "@/lib/queries";
 import { notify } from "@/lib/toasts";
@@ -46,6 +47,12 @@ const OPERATION_CODES = ["10", "12", "14", "20", "22", "24", "30", "40", "50", "
 
 /** Document-type codes — labels live in i18n (etransport.docType.<code>). */
 const DOC_TYPE_CODES = ["10", "20", "30", "9999"];
+
+/**
+ * CodTaraType din schema_ETR_v2.xsd folosește "EL" pentru Grecia (convenția fiscală UE),
+ * NU codul ISO 3166 "GR" — care nu e în enum și ar fi respins la schemă.
+ */
+const etrCountryCode = (iso: string) => (iso === "GR" ? "EL" : iso);
 
 const emptyGood = (): EtransportGood => ({
   codScopOperatiune: "101",
@@ -91,10 +98,18 @@ export function EtransportPage() {
   const [partnerCode, setPartnerCode] = useState("");
   const [nrVehicul, setNrVehicul] = useState("");
   const [dataTransport, setDataTransport] = useState("");
+  // Organizatorul transportului — codTaraOrgTransport + denumireOrgTransport sunt obligatorii
+  // în DateTransportType (schema v2). Denumirea urmărește compania activă până la prima editare.
+  const [orgCountry, setOrgCountry] = useState("RO");
+  const [orgNameEdit, setOrgNameEdit] = useState<string | null>(null);
+  const orgName = orgNameEdit ?? company?.legalName ?? "";
   const [startLoc, setStartLoc] = useState("");
   const [finalLoc, setFinalLoc] = useState("");
   const [judetStart, setJudetStart] = useState("");
   const [judetFinal, setJudetFinal] = useState("");
+  // denumireStrada e obligatorie în LocatieType (schema v2) pentru ambele capete de traseu.
+  const [stradaStart, setStradaStart] = useState("");
+  const [stradaFinal, setStradaFinal] = useState("");
   const [documents, setDocuments] = useState<EtransportDoc[]>([emptyDoc()]);
   const [errors, setErrors] = useState<string[]>([]);
 
@@ -103,9 +118,22 @@ export function EtransportPage() {
     codTipOperatiune,
     goods,
     partner: { codTara: partnerCountry, cod: partnerCode, denumire: partnerName },
-    transport: { nrVehicul, dataTransport },
-    locStart: { codJudet: judetStart ? Number(judetStart) : null, denumireLocalitate: startLoc },
-    locFinal: { codJudet: judetFinal ? Number(judetFinal) : null, denumireLocalitate: finalLoc },
+    transport: {
+      nrVehicul,
+      dataTransport,
+      codTaraOrgTransport: orgCountry,
+      denumireOrgTransport: orgName,
+    },
+    locStart: {
+      codJudet: judetStart ? Number(judetStart) : null,
+      denumireLocalitate: startLoc,
+      denumireStrada: stradaStart,
+    },
+    locFinal: {
+      codJudet: judetFinal ? Number(judetFinal) : null,
+      denumireLocalitate: finalLoc,
+      denumireStrada: stradaFinal,
+    },
     documents,
   });
 
@@ -303,7 +331,23 @@ export function EtransportPage() {
               <input className="input num" type="date" value={dataTransport} onChange={(e) => setDataTransport(e.target.value)} />
             </div>
           </div>
-          {/* Traseu — județ (cod 1..52) + localitate sunt ambele necesare pentru o adresă validă */}
+          {/* Organizatorul transportului — obligatoriu în schema v2 (DateTransportType) */}
+          <div className="grid2" style={{ marginTop: 13 }}>
+            <div className="field">
+              <label>{t("etransport.form.orgCountry")}</label>
+              <select className="select" value={orgCountry} onChange={(e) => setOrgCountry(e.target.value)}>
+                {COUNTRIES.map((c) => {
+                  const code = etrCountryCode(c.code);
+                  return <option key={code} value={code}>{c.name} ({code})</option>;
+                })}
+              </select>
+            </div>
+            <div className="field">
+              <label>{t("etransport.form.orgName")}</label>
+              <input className="input" type="text" value={orgName} onChange={(e) => setOrgNameEdit(e.target.value)} />
+            </div>
+          </div>
+          {/* Traseu — județ (cod 1..52) + localitate + stradă, toate necesare pentru o adresă validă */}
           <div className="grid4" style={{ marginTop: 13 }}>
             <div className="field">
               <label>{t("etransport.form.startCounty")}</label>
@@ -320,6 +364,17 @@ export function EtransportPage() {
             <div className="field">
               <label>{t("etransport.form.endCity")}</label>
               <input className="input" type="text" value={finalLoc} onChange={(e) => setFinalLoc(e.target.value)} />
+            </div>
+          </div>
+          {/* Strada — denumireStrada e obligatorie în LocatieType pentru ambele capete */}
+          <div className="grid2" style={{ marginTop: 13 }}>
+            <div className="field">
+              <label>{t("etransport.form.startStreet")}</label>
+              <input className="input" type="text" value={stradaStart} onChange={(e) => setStradaStart(e.target.value)} />
+            </div>
+            <div className="field">
+              <label>{t("etransport.form.endStreet")}</label>
+              <input className="input" type="text" value={stradaFinal} onChange={(e) => setStradaFinal(e.target.value)} />
             </div>
           </div>
 

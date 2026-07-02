@@ -8,8 +8,8 @@
 use std::path::Path;
 
 use efactura_desktop_lib::anaf_decl::etransport::{
-    generate_etransport_xml, EtransportDeclaration, Good, Partner, RouteLoc, Transport,
-    TransportDoc,
+    generate_etransport_xml, validate_etransport, EtransportDeclaration, Good, Partner, RouteLoc,
+    Transport, TransportDoc,
 };
 use efactura_desktop_lib::anaf_decl::validation::{validate_with_xsd, xmllint_available};
 
@@ -75,8 +75,27 @@ fn etransport_validates_against_official_xsd() {
         return;
     }
 
-    let xml = generate_etransport_xml(&full_declaration()).expect("generate_etransport_xml");
+    let decl = full_declaration();
+    let val_errs = validate_etransport(&decl);
+    assert!(
+        val_errs.is_empty(),
+        "fully-populated declaration must pass local validation, got: {val_errs:?}"
+    );
+
+    let xml = generate_etransport_xml(&decl).expect("generate_etransport_xml");
     eprintln!("Generated e-Transport XML ({} bytes):\n{xml}", xml.len());
+    // The attributes the UI historically failed to send — required by the official XSD.
+    for needle in [
+        "denumireStrada=\"Str. A\"",
+        "denumireStrada=\"Str. B\"",
+        "codTaraOrgTransport=\"RO\"",
+        "denumireOrgTransport=\"Transportator SRL\"",
+    ] {
+        assert!(
+            xml.contains(needle),
+            "XML must contain {needle}, got: {xml}"
+        );
+    }
 
     let tmp = std::env::temp_dir().join("etransport_xsd_test.xml");
     std::fs::write(&tmp, xml.as_bytes()).expect("write temp XML");
