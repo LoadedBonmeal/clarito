@@ -34,7 +34,6 @@ a.nav-item{text-decoration:none;color:inherit}
 @keyframes anDotBreathe{0%,100%{opacity:1}50%{opacity:.7}}
 @keyframes anDotPulse{0%{transform:scale(1)}45%{transform:scale(1.5)}100%{transform:scale(1)}}
 .spv-dot{width:6px;height:6px;border-radius:999px;background:var(--green,#047857);flex:none;animation:anDotBreathe 2.2s ease-in-out infinite}
-.spv-dot.pulse{animation:anDotPulse .4s var(--anim-ease),anDotBreathe 2.2s ease-in-out .4s infinite}
 
 /* ═══ 2. BELL — swings ONCE when unread count increases; badge pops ═══ */
 @keyframes anBellSwing{0%{transform:rotate(0)}25%{transform:rotate(-12deg)}55%{transform:rotate(9deg)}80%{transform:rotate(-4deg)}100%{transform:rotate(0)}}
@@ -67,11 +66,11 @@ svg[data-ic="trash"],svg[data-ic="pen"],svg[data-ic="copy"],svg[data-ic="undo"],
 
 /* ═══ 6. STORNO rotates -180 (undo); PLUS rotates 90 / becomes x when open ═══ */
 :is(.pill-btn,.btn-dark,.mini-btn,.pop-item):hover svg[data-ic="undo"]{transform:rotate(-180deg)}
-:is(.pill-btn,.btn-dark,.sq-btn,.nav-primary):hover svg[data-ic="plus"]{transform:rotate(90deg)}
+:is(.pill-btn,.btn-dark,.sq-btn):hover svg[data-ic="plus"]{transform:rotate(90deg)}
 .anim-open svg[data-ic="plus"]{transform:rotate(45deg) !important}
 /* plus morphs to an × while the button is pressed (Nou + Factura noua) */
-.btn-dark svg[data-ic="plus"],.nav-primary svg[data-ic="plus"]{transition:transform .18s var(--anim-ease)}
-.btn-dark:active svg[data-ic="plus"],.nav-primary:active svg[data-ic="plus"]{transform:rotate(45deg)}
+.btn-dark svg[data-ic="plus"]{transition:transform .18s var(--anim-ease)}
+.btn-dark:active svg[data-ic="plus"]{transform:rotate(45deg)}
 
 /* ═══ 7. SEARCH loupe tips toward the field on focus, settles ═══ */
 @keyframes anLoupe{0%{transform:none}50%{transform:scale(1.08) rotate(8deg)}100%{transform:none}}
@@ -117,9 +116,8 @@ svg[data-ic="trash"],svg[data-ic="pen"],svg[data-ic="copy"],svg[data-ic="undo"],
 @keyframes nicBell{0%{transform:rotate(0)}28%{transform:rotate(-11deg)}58%{transform:rotate(8deg)}82%{transform:rotate(-3deg)}100%{transform:rotate(0)}}
 .side-scroll .nav-item:hover [data-nic="bell"]{animation:nicBell .5s var(--anim-ease) !important;transform-origin:50% 15%}
 
-/* header: collapse panel + search loupe (sync/bell intentionally stay still —
+/* header: search loupe (sync/bell intentionally stay still —
    they move only on their real events) */
-.topbar #collapseBtn:hover [data-nic="collapse"]{transform:scale(1.1)}
 .topbar .search:hover [data-nic="loupe"]{transform:scale(1.08) rotate(-8deg);transform-origin:40% 40%}
 
 /* ═══ HEADER cluster (SPV pill · sync · + Nou · bell) hover + interact ═══ */
@@ -146,21 +144,13 @@ svg[data-ic="trash"],svg[data-ic="pen"],svg[data-ic="copy"],svg[data-ic="undo"],
 .chip-anim{animation:anChipIn .25s var(--anim-ease)}
 .chip-anim .sic path,.chip-anim .sic circle{stroke-dasharray:48;animation:anDraw .3s var(--anim-ease)}
 
-/* ═══ 9. DEADLINE warnings — ONE attention pulse when scrolled into view ═══ */
-@keyframes anAttn{0%{transform:scale(1)}45%{transform:scale(1.12)}100%{transform:scale(1)}}
-.attn-pulse{animation:anAttn .45s var(--anim-ease);transform-origin:center}
-
-/* ═══ 10. SIDEBAR — indicator slides between items ═══ */
+/* ═══ 10. SIDEBAR — stacking context for hover/active layering ═══ */
 .side-scroll{position:relative}
 .side-scroll .company,.side-scroll .nav-item,.side-scroll .sec,.side-scroll .nav-group{position:relative;z-index:1}
-.nav-slider{position:absolute;left:12px;right:12px;height:38px;border-radius:10px;background:var(--bg-content);border:1px solid var(--line,#ECECEC);box-shadow:0 1px 1px rgba(0,0,0,.03),0 6px 16px -8px rgba(0,0,0,.22);opacity:0;pointer-events:none;z-index:0;transition:top .12s var(--anim-ease),opacity .08s ease}
-.nav-slider.on{opacity:1}
 
-/* ═══ 11. load-once: chart bars + plafon meters (JS adds classes) ═══ */
+/* ═══ 11. load-once: chart bars (JS adds the class) ═══ */
 @keyframes anGrowY{from{transform:scaleY(0)}to{transform:scaleY(1)}}
-@keyframes anGrowX{from{transform:scaleX(0)}to{transform:scaleX(1)}}
 .anim-bar{transform-origin:50% 100%;animation:anGrowY .45s var(--anim-ease) backwards}
-.anim-meter{transform-origin:0 50%;animation:anGrowX .6s var(--anim-ease) backwards}
 
 /* ═══ 12. MODALS — scale .98→1 + fade in 150ms, out 120ms ═══ */
 @keyframes anModalIn{0%{opacity:0;transform:scale(.98)}100%{opacity:1;transform:scale(1)}}

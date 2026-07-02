@@ -1,14 +1,6 @@
 import { useEffect } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { useAppStore, type DensityMode } from "@/lib/store";
-
-function applyDensityClass(density: DensityMode) {
-  const root = document.documentElement;
-  root.classList.remove("density-compact", "density-comfy", "density-relaxed");
-  if (density === "compact") root.classList.add("density-compact");
-  if (density === "comfortable") root.classList.add("density-comfy");
-  // "relaxed" uses default row heights — no extra class
-}
+import { applyDensity, useAppStore } from "@/lib/store";
 
 export function useTheme() {
   const theme = useAppStore((s) => s.theme);
@@ -58,7 +50,7 @@ export function useTheme() {
 
   // Sync density class on mount + whenever density changes
   useEffect(() => {
-    applyDensityClass(density ?? "comfortable");
+    applyDensity(density ?? "comfortable");
   }, [density]);
 
   return { theme, setTheme };

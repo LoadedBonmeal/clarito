@@ -5,7 +5,7 @@ export type ThemeMode = "light" | "dark" | "system";
 export type DensityMode = "compact" | "comfortable" | "relaxed";
 
 /** Apply density class to documentElement — called on every density change */
-function applyDensity(density: DensityMode) {
+export function applyDensity(density: DensityMode) {
   const root = document.documentElement;
   root.classList.remove("density-compact", "density-comfy", "density-relaxed");
   if (density === "compact") root.classList.add("density-compact");

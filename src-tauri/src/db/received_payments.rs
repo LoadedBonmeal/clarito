@@ -59,8 +59,8 @@ pub async fn create(
     create_in(&mut conn, input).await
 }
 
-/// Period-lock check pe o CONEXIUNE existentă (`period_locks::is_period_locked` cere un pool;
-/// `create_in` rulează și în tranzacția lui `match_bank_txn`). Fail-closed: o eroare DB se
+/// Period-lock check pe o CONEXIUNE existentă (`period_locks::is_period_locked` cere un pool,
+/// dar `create_in` primește doar conexiunea apelantului). Fail-closed: o eroare DB se
 /// propagă (nu se tratează drept „deblocat").
 async fn is_period_locked_in(
     conn: &mut sqlx::SqliteConnection,
@@ -77,8 +77,9 @@ async fn is_period_locked_in(
     Ok(row.is_some())
 }
 
-/// Variantă pe conexiune/tranzacție EXISTENTĂ a lui [`create`] — folosită de `match_bank_txn`
-/// pentru a crea plata și a marca tranzacția bancară MATCHED atomic (o singură tranzacție).
+/// Variantă pe conexiune/tranzacție EXISTENTĂ a lui [`create`]. NOTĂ: potrivirea bancară
+/// (`match_bank_txn`) NU rulează atomic prin această funcție — apelează `create` la nivel
+/// de pool și COMPENSEAZĂ (șterge plata creată) dacă marcarea tranzacției MATCHED eșuează.
 pub async fn create_in(
     conn: &mut sqlx::SqliteConnection,
     input: CreateReceivedPaymentInput,
@@ -225,8 +226,10 @@ pub async fn delete(pool: &SqlitePool, id: &str, company_id: &str) -> AppResult<
 }
 
 /// Variantă pe tranzacție EXISTENTĂ a lui [`delete`] — FĂRĂ guard de period-lock (apelanții
-/// trebuie să fi verificat deja blocarea perioadei). Folosită de `delete` și de
-/// `unmatch_bank_txn` (plata + resetarea tranzacției bancare într-o singură tranzacție).
+/// trebuie să fi verificat deja blocarea perioadei). Folosită de `delete` (rândul plății +
+/// jurnalul GL într-o singură tranzacție). NOTĂ: `unmatch_bank_txn` apelează `delete` la
+/// nivel de pool — resetarea tranzacției bancare este un pas SEPARAT (compensare, nu
+/// atomicitate).
 pub async fn delete_in(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     id: &str,

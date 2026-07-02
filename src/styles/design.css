@@ -73,24 +73,10 @@
   --font-ui: "Inter", "Segoe UI", "Tahoma", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", "Cascadia Mono", "Consolas", "SF Mono", monospace;
 
-  /* ── rf-* alias block — used by rf.css and the new component kit ── */
+  /* ── rf-* alias block — the aliases still consumed (auth screens, shared
+     widgets, clarito-shell.css); unused legacy aliases were removed ── */
   --rf-accent:        var(--accent);
-  --rf-accent-hover:  var(--accent-hover);
-  --rf-accent-active: #000000;
-  --rf-accent-tint:   var(--accent-soft);
-  --rf-accent-tint-2: #FAFAFB;
-  --rf-accent-ring:   rgba(29, 29, 31, 0.16);
-
   --rf-content:       var(--bg-content);
-  --rf-app-bg:        var(--bg);
-  --rf-sidebar:       var(--bg-sidebar);
-  --rf-toolbar-1:     var(--bg-toolbar);
-  --rf-toolbar-2:     #FFFFFF;
-  --rf-table-head:    var(--bg-table-header);
-  --rf-zebra:         var(--bg-row-zebra);
-  --rf-hover:         var(--bg-row-hover);
-  --rf-selected:      var(--bg-row-selected);
-  --rf-overlay:       rgba(17, 20, 28, 0.40);
 
   --rf-text:          var(--text);
   --rf-text-muted:    var(--text-muted);
@@ -98,7 +84,6 @@
   --rf-text-on-accent:#FFFFFF;
 
   --rf-border:        var(--border);
-  --rf-border-strong: var(--border-strong);
 
   /* semantic status — translucent fills (design chip style) */
   --rf-success:       #047857;
@@ -110,29 +95,9 @@
   --rf-warning:       #B45309;
   --rf-warning-bg:    rgba(180, 83, 9, 0.07);
   --rf-warning-bd:    rgba(180, 83, 9, 0.18);
-  --rf-info:          #44464B;
-  --rf-info-bg:       #F4F4F5;
-  --rf-info-bd:       #E2E2E4;
-  --rf-neutral:       #6E6E73;
   --rf-neutral-bg:    #F4F4F5;
-  --rf-neutral-bd:    #E8E8EA;
-
-  /* radius */
-  --rf-radius:    12px;
-  --rf-radius-sm: 8px;
-  --rf-radius-lg: 16px;
-
-  /* elevation */
-  --rf-shadow-sm: 0 1px 2px rgba(0,0,0,0.03);
-  --rf-shadow:    0 1px 2px rgba(0,0,0,0.04), 0 1px 1px rgba(0,0,0,0.03);
-  --rf-shadow-md: 0 12px 32px -10px rgba(0,0,0,0.28), 0 2px 6px rgba(0,0,0,0.05);
-
-  /* row density */
-  --rf-row-h: 48px;
-  --rf-header-h: 42px;
 
   /* fonts (aliases) */
-  --rf-font: var(--font-ui);
   --rf-mono: var(--font-mono);
 }
 
@@ -141,15 +106,11 @@
   --row-h: 30px;
   --header-h: 28px;
   --table-cell-px: 10px;
-  --rf-row-h: 34px;
-  --rf-header-h: 28px;
 }
 .density-comfy {
   --row-h: 42px;
   --header-h: 36px;
   --table-cell-px: 16px;
-  --rf-row-h: 42px;
-  --rf-header-h: 36px;
 }
 
 /* dark mode */
@@ -195,22 +156,7 @@
 
   /* rf aliases updated for dark — monochrome (light ink accent) */
   --rf-accent:        #F5F5F7;
-  --rf-accent-hover:  #FFFFFF;
-  --rf-accent-active: #E2E2E6;
-  --rf-accent-tint:   #26262B;
-  --rf-accent-tint-2: #1F1F24;
-  --rf-accent-ring:   rgba(245, 245, 247, 0.22);
-
   --rf-content:       #15171F;
-  --rf-app-bg:        #0B0D12;
-  --rf-sidebar:       #101219;
-  --rf-toolbar-1:     #15171F;
-  --rf-toolbar-2:     #15171F;
-  --rf-table-head:    #1A1D26;
-  --rf-zebra:         #15171F;
-  --rf-hover:         #1C1F29;
-  --rf-selected:      #23262F;
-  --rf-overlay:       rgba(3, 5, 10, 0.66);
 
   --rf-text:          #ECEDF2;
   --rf-text-muted:    #9DA2B0;
@@ -218,13 +164,11 @@
   --rf-text-on-accent:#1D1D1F;
 
   --rf-border:        #23262F;
-  --rf-border-strong: #323641;
 
   --rf-success: #3DD68C; --rf-success-bg: rgba(61,214,140,0.10); --rf-success-bd: rgba(61,214,140,0.22);
   --rf-error:   #FB7A7A; --rf-error-bg:   rgba(251,122,122,0.10); --rf-error-bd:   rgba(251,122,122,0.22);
   --rf-warning: #F5B642; --rf-warning-bg: rgba(245,182,66,0.10); --rf-warning-bd: rgba(245,182,66,0.22);
-  --rf-info:    #C7C9CE; --rf-info-bg:    #1D2029; --rf-info-bd:    #2b2f3a;
-  --rf-neutral: #9DA2B0; --rf-neutral-bg: #1D2029; --rf-neutral-bd: #2b2f3a;
+  --rf-neutral-bg: #1D2029;
 }
 
 /* ------------------------------------------------------------------
@@ -260,7 +204,6 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 input, select, textarea { font: inherit; color: inherit; }
 
 .mono { font-family: var(--font-mono); font-feature-settings: "tnum" 1, "ss01" 1; }
-.tnum { font-variant-numeric: tabular-nums; }
 .muted { color: var(--text-muted); }
 .dim { color: var(--text-dim); }
 
@@ -297,69 +240,16 @@ input, select, textarea { font: inherit; color: inherit; }
 }
 .app.sidebar-collapsed { grid-template-columns: 92px 1fr; }
 
-/* Topbar spans the full width across the top; sidebar sits below it on the
-   left, main fills the rest (design clarito-shell.css grid). */
-.app-main {
-  grid-area: main;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.content {
-  background: var(--bg-content);
-  min-width: 0;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-
 /* ------------------------------------------------------------------
    LEGACY pre-rf widget CSS DELETED (Stage J) — superseded by the verbatim
    Claude-Design system (clarito-shell.css / clarito-pages.css / page-*.css).
    ------------------------------------------------------------------ */
 
-/* ==================================================================
-   CROSS-PLATFORM INPUT ADAPTATION
-   ================================================================== */
-
-/* Touch / coarse pointer: enlarge tap targets, remove hover-only cues */
-@media (pointer: coarse) {
-  .btn-icon     { min-width: 44px; min-height: 44px; }
-  .sidebar-item { min-height: 44px; }
-}
-
 /* ─── Print styles ──────────────────────────────────────────────────────── */
 @media print {
-  /* Hide all rf chrome so only page content prints */
-  .rf-topbar,
-  .rf-sidebar,
-  .rf-statusbar,
-  .rf-page-head,
-  .palette-scrim {
-    display: none !important;
-  }
-
-  /* Also hide action buttons inside the content area */
-  .rf-btn,
-  .rf-icon-btn {
-    display: none !important;
-  }
-
   /* Make the app fill the page */
-  .app,
-  .app-main {
+  .app {
     display: block !important;
-  }
-
-  .rf-content {
-    width: 100% !important;
-    height: auto !important;
-    overflow: visible !important;
   }
 
   body, html {
@@ -369,27 +259,5 @@ input, select, textarea { font: inherit; color: inherit; }
 
   @page {
     margin: 1.5cm;
-  }
-
-  /* Invoice detail: rf-tbl prints cleanly */
-  .rf-tbl {
-    width: 100% !important;
-    border-collapse: collapse;
-    font-size: 10pt;
-  }
-
-  .rf-tbl th,
-  .rf-tbl td {
-    border: 1px solid #ccc !important;
-    padding: 4px 6px !important;
-    background: #fff !important;
-    color: #000 !important;
-  }
-
-  .rf-tbl thead th {
-    background: #1e3a5f !important;
-    color: #fff !important;
-    -webkit-print-color-adjust: exact;
-    print-color-adjust: exact;
   }
 }

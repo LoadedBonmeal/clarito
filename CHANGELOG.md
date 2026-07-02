@@ -2,6 +2,98 @@
 
 Toate modificările notabile ale Clarito (fost RoFactura). Format: [Keep a Changelog](https://keepachangelog.com), versionare [SemVer](https://semver.org).
 
+## [0.7.4] - 2026-07-02
+
+Audit final de publicare (11 dimensiuni): remedierea celor două blocante P0 (e-Factura pentru neplătitori de TVA + OAuth pe Windows) plus corecții fiscale D300/SAF-T și completarea blocajelor de perioadă.
+
+### Fixed
+- **e-Factura neplătitori de TVA (P0)**: facturile cu categoria O nu mai sunt respinse fatal de ANAF (BR-CO-09/BR-O); preflight BR-IC-02 blochează liniile K emise de vânzători neplătitori; sectoarele Bucureștiului și informațiile de livrare pentru K corectate.
+- **Windows (P0)**: URL-ul OAuth nu mai este spart de `cmd` la deschiderea browserului; token-urile ANAF nu mai sunt trunchiate de plafonul de 2560 bytes al Credential Manager (chunking); salvare CSV prin dialog nativ.
+- **Fiscal**: remapare rânduri de vânzări D300 pentru categoriile Z/K/E/G + plafonul „suma netaxabilă"; SAF-T Payments cu FX corect; termenul dividendelor în D100; semnele închiderii de TVA.
+- **Bancă**: sugestiile de potrivire pentru tranzacțiile de ieșire (plăți către furnizori) nu funcționaseră niciodată (referință la o coloană inexistentă) — acum funcționale; potrivire conștientă de monedă.
+- **Blocaj de perioadă**: garduri pe ștergeri/dez-potriviri + blocarea închiderii anuale + exportul D406 pe perioade blocate + RBAC pe exportatoare.
+- **UI**: temă întunecată în vizualizatorul XML, înălțimea modalelor, contrast + a11y pe toggle-uri, plurale românești, selector SAGA robust.
+
+### Changed
+- Curățenie de cod (Wave 6): reconstruit harness-ul de teste DUK, cod mort eliminat, PeriodLocksPanel conectat, clippy strict pe tot crate-ul; limitări cunoscute documentate (D100/D101 UI-wiring + 8 constatări amânate verificate).
+
+## [0.7.3] - 2026-07-01
+
+Audit pre-publicare profund — a prins un blocant real de publicare pe e-Factura + corecții la importuri și SAF-T.
+
+### Fixed
+- **e-Factura unitCode (blocant publicare)**: unitățile de măsură se emit acum ca UN/ECE Rec 20 (ex. „buc" → `H87`) — înainte, orice factură cu unitatea implicită era respinsă de ANAF (BR-CL-23).
+- **Import**: WinMentor cu virgulă zecimală nu mai produce silențios 0; diacriticele din DBF-urile SAGA decodate corect (code pages CP852/CP1250).
+- **SAF-T D406**: furnizorii străini primesc un SupplierID valid, consecvent cu GL (fără referințe agățate; validatorul DUK respinge bucket-ul generic).
+- **Salarizare**: part-time + depășire diurnă — D112 declară CAS/CASS pe baza ridicată (GL ≡ D112).
+- `is_period_locked` eșuează închis (fail-closed) pe toate cele 17 situri; i18n + cod mort; asocierea fișierelor `.xml`.
+
+## [0.7.2] - 2026-07-01
+
+Responsive pe toate rezoluțiile + completarea blocajului fiscal de perioadă pe toate căile de postare GL + solduri SAF-T reale + întărirea licențierii.
+
+### Added
+- **SAF-T D406**: solduri reale de deschidere/închidere (bazate pe semn, nu fixe pe tip de cont) în locul valorilor 0.00; gate-ul de integrare XSD + DUK restaurat în verificarea locală.
+- **D300**: avertisment de reconciliere înainte de depunere când facturile primite au defalcarea de TVA incompletă.
+
+### Fixed
+- **Layout responsiv** pentru fiecare ecran (1024px → 4K) + scrollbar-uri Windows + suprimarea flash-ului de consolă la procesele copil pe Windows.
+- **Blocaj de perioadă complet**: garduri pe toate căile directe de postare GL (post_manual_journal, post_payroll, post_depreciation, post_register_lines + restul de 8 postere); intrare de audit la deblocarea unei perioade depuse; avertisment la validarea facturilor în perioade închise.
+- **Salarizare**: deducerea personală corectată la regula 2026 ancorată în salariul minim (nu pragul fix pre-2023 de 3600 lei).
+- **Robustețe**: ingestie SPV atomică (rollback la eșecul inserării liniilor de TVA), garduri multi-tenant, cifra de control CUI la import, indexuri pe căile fierbinți gl_entry, sanitizarea caracterelor de control interzise XML 1.0 în UBL + declarații.
+- **UI**: cardul Declarații nu mai taie butoanele din coloana dreaptă; notă TVA 9% locuințe.
+
+### Security
+- **Licențiere întărită**: anti-rollback cu semănare în keychain la start_trial/activare, machine-id nativ (machine-uid), eliminarea checksum-ului legacy.
+
+### Changed
+- Branding installer RoFactura → Clarito (imagini NSIS/DMG + sursa iconului).
+
+## [0.7.1] - 2026-06-25
+
+Foaia de parcurs ERP completă (P1+P2+P3, 20 de valuri cu QA) + declarații noi + vizualizator XML/PDF în aplicație + RBAC multi-utilizator. Cel mai mare release de până acum (~230 de commit-uri).
+
+### Added
+- **Terți & bancă**: IBAN + termene de plată pe contacte, aging AR/AP (balanță cu vechime sold), import extrase bancare (MT940/CAMT.053/CSV) cu potrivire pe facturi, reevaluare valutară lunară (OMFP 1802), casă în valută (5314), registru de casă (14-4-7A), fișă de cont pe partener.
+- **Stocuri & producție**: multi-gestiune, NIR (14-3-1A) + mod retail, transfer inter-gestiune (14-3-3A), producție/BOM cu cost complet (materiale + manoperă + regie, OMFP 1802/IAS 2), aviz de însoțire (14-3-6A), dezmembrări, LIFO, registru-inventar + inventariere.
+- **Documente comerciale**: comenzi/oferte/devize, contracte cu notificare la expirare, facturi de avans 419/409 (TVA la avans + stornare la decontare, art. 282), cecuri & bilete la ordin, deconturi + avansuri de trezorerie (542) cu motor de diurnă (plafon + split multi-lună).
+- **Salarizare**: sporuri + rețineri/popriri, pontaje (condică de prezență), simulator brut↔net, export REGES-Online (HG 295/2025), diurnă impozabilă → D112 automat (toate cele 4 contribuții), config GL per firmă.
+- **Declarații noi**: D205 (dividende, validat DUK verify-first), D207 (dividende nerezidenți, XSD), D301/D700/D710 (trec DUKIntegrator real), D112 migrat la `:v7` + concedii medicale B-path, istoric depuneri („Declarații depuse"), toggle rectificativă (D112/D205/D207/D390), registrul bunurilor de capital + ajustare TVA art. 305 (D300 R31_2), rânduri memo „TVA neexigibilă" în D300, angajamente 471/472, provizioane 15x.
+- **Import date**: asistent de migrare din SAGA (XML + DBF), WinMentor (TXT) și SmartBill (REST) — staging, dedup, păstrarea numerelor de factură.
+- **UI**: import integral „Claude Design" (sidebar rotunjit + toate paginile rescrise), vizualizator/editor XML în aplicație care redă declarațiile ca documente etichetate uman (+ XLSX, Print/PDF, re-validare DUK), vizualizator PDF încorporat (PDFium WASM), pagini Avize + Dezmembrări, popup de notificări, animații.
+- **VIES**: validare cod TVA intra-UE + preflight parteneri pe D390.
+
+### Fixed
+- **Salarizare**: eliminată contribuția-fantomă CCI 0,85% (abrogată din 2018, inclusă în CAM 2,25%); floor-ul indemnizației de concediu pe durata certificatului (OUG 91/2025); un singur motor de calcul alimentează și GL și D112 (nu mai pot diverge).
+- **Audituri**: valuri multiple cu QA — scurgeri de export între companii, orfani GL la ștergerea plăților, blocaj fiscal de perioadă (prima versiune), rasa de conversie ofertă→comandă (status în afara CHECK-ului), tray pe macOS, RBAC viewer cu adevărat read-only + gardă last-admin, parolă minim 8 caractere.
+- **D390**: etichetele codurilor de operațiune P/S/R corectate conform OPANAF 705/2020; D300 R17_1 include R1_1 + R13_1 (P0); R12 taxare inversă doar din achiziții.
+- Fixture-urile de test cu `CREATE TABLE` scris de mână convertite integral la `sqlx::migrate!` + gard anti-regresie.
+
+### Security
+- **RBAC multi-utilizator**: gate de comenzi fără bypass + autentificare Argon2id + roluri (deny-by-default pe scrieri pentru viewer).
+- Timeout de sesiune la inactivitate (15 min), cert-pinning ANAF (safe, default-off), scoping multi-tenant pe statusurile facturilor + jurnalul de activitate.
+
+## [0.7.0] - 2026-06-11
+
+Programul fiscal 2026 complet: TVA la încasare pe ambele sensuri, salarizare + D112, bilanțuri oficiale, D100/D101, e-Transport, e-TVA, D390 — plus validare DUK integrată în aplicație (JRE minimal + DUKIntegrator incluse în installer) și internaționalizare EN.
+
+### Added
+- **TVA la încasare (cash-VAT)** cap-coadă: decizie de exigibilitate + matrice de excludere, motor de eliberare proporțională, rutare D300 pe data încasării/plății (ambele sensuri, 4428), mențiunea obligatorie pe factură (UBL + PDF), monitor plafon 5.000.000 lei + reminder 097/700.
+- **Salarizare & D112**: motor de calcul 2026 (CAS/CASS/CAM/impozit, carve-out 300 lei OUG 89/2025), angajați + rulări lunare + postări GL, concedii medicale (OUG 158/2005), sedii secundare (split F1/F2), taxonomia completă art. 146 part-time, export XML D112 validat pe DecUnica.xsd.
+- **Bilanț & profit**: cont de profit și pierdere + închidere 6/7→121, bilanț OMFP 1802/2014 cu export XML oficial pe toate cele 3 formulare (S1005 micro / S1003 mic / S1002 mare), regula de mărime „2 ani consecutivi", D100 (trimestrial) + D101 (impozit pe profit, OPANAF 206/2025, cap 70% report pierdere).
+- **e-Transport**: declarație UIT (schema v2) + submisie OAuth + fereastra de 3 zile; **SPV**: inbox general (recipise, notificări, somații); **e-TVA**: preluare P300 precompletat + reconciliere pre-depunere; **D390**: recapitulativă VIES intra-UE.
+- **Validare DUK în aplicație**: installerele includ un JRE minimal (jlink) + jar-urile DUKIntegrator — exportul oficial validează local (blocare + override + notă grațioasă); banner de versiune formular ANAF la lansare.
+- **Stocuri & imobilizări**: evaluare stoc FIFO/CMP cu ledger + postări GL, amortizare mijloace fixe (registru + 6811/281x lunar + cedare), monitor Intrastat (1.000.000 lei/flux).
+- **GL**: închidere TVA de perioadă (4423/4424), registru-jurnal + cartea mare + balanța de verificare (patru egalități), câștig/pierdere FX (665/765), split venituri 701/704/707.
+- **i18n**: interfață tradusă integral în engleză (5 valuri) + infrastructură i18next; **UI**: port „verbatim" al designului nou pe toate paginile, icon macOS conform HIG, template PDF de factură personalizabil; facturi B2C (2026).
+- **CI**: workflow de release (Windows .exe/.msi + macOS .dmg per-arch).
+
+### Fixed
+- **Cote TVA 2026** (Legea 141/2025): catalog aliniat (21%/11%), facturile/produsele noi implicit 21%, avertisment non-blocant pe cote vechi, respingerea cotelor abrogate pe facturi post-reformă.
+- **Storno + cash-VAT**: storno nu mai inversează semnele GL (consistent cu D300); originalul STORNAT nu amână TVA la 4428.
+- Trei runde de audit (r3): scoping multi-tenant pe stocuri, rotunjire comercială peste modulele vechi, atomicitate batch declarații, garduri de date calendaristice, plafonul micro EOY + avertisment D112 iulie-2026, monitoare de retenție SPV/UIT/plafon TVA.
+- Lookup ANAF pe CUI reparat (endpoint v9) cu auto-completare la contacte.
+
 ## [0.6.0] - 2026-06-03
 
 Declarații ANAF conforme oficial: **D300, D394 și SAF-T D406 trec validatorul oficial ANAF (DUKIntegrator) cu 0 erori** — nu doar XSD, ci și regulile de business. Regulile au fost extrase prin decompilarea validatoarelor ANAF; fiecare etapă construită cu sub-agenți + QA adversarial (re-rulare a validatorului real) + gate verde.

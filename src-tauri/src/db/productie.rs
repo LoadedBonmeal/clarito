@@ -801,14 +801,21 @@ pub async fn produce(
 
         if let Err(e) = stock_valuation::record_movement(pool, &out_input, Dir::Out).await {
             // Compensare: anulăm tot ce s-a comis până acum
-            let _ = rollback_production_movements(
+            if let Err(re) = rollback_production_movements(
                 pool,
                 company_id,
                 &order_id,
                 &affected_products,
                 &input.gestiune_id,
             )
-            .await;
+            .await
+            {
+                tracing::error!(
+                    error = %re,
+                    order_id = %order_id,
+                    "compensation rollback FAILED after component stock OUT (record_movement) error — stock_ledger may be inconsistent for this order"
+                );
+            }
             return Err(e);
         }
     }
@@ -828,14 +835,21 @@ pub async fn produce(
     {
         Ok(rows) => rows.iter().map(|(v,)| dec(v)).sum(),
         Err(e) => {
-            let _ = rollback_production_movements(
+            if let Err(re) = rollback_production_movements(
                 pool,
                 company_id,
                 &order_id,
                 &affected_products,
                 &input.gestiune_id,
             )
-            .await;
+            .await
+            {
+                tracing::error!(
+                    error = %re,
+                    order_id = %order_id,
+                    "compensation rollback FAILED after material-cost aggregation query error — stock_ledger may be inconsistent for this order"
+                );
+            }
             return Err(e.into());
         }
     };
@@ -891,14 +905,21 @@ pub async fn produce(
     };
 
     if let Err(e) = stock_valuation::record_movement(pool, &in_input, Dir::In).await {
-        let _ = rollback_production_movements(
+        if let Err(re) = rollback_production_movements(
             pool,
             company_id,
             &order_id,
             &affected_products,
             &input.gestiune_id,
         )
-        .await;
+        .await
+        {
+            tracing::error!(
+                error = %re,
+                order_id = %order_id,
+                "compensation rollback FAILED after finished-good stock IN (record_movement) error — stock_ledger may be inconsistent for this order"
+            );
+        }
         return Err(e);
     }
 
@@ -932,14 +953,21 @@ pub async fn produce(
         let prod_in_row = match prod_in_lookup {
             Ok(r) => r,
             Err(e) => {
-                let _ = rollback_production_movements(
+                if let Err(re) = rollback_production_movements(
                     pool,
                     company_id,
                     &order_id,
                     &affected_products,
                     &input.gestiune_id,
                 )
-                .await;
+                .await
+                {
+                    tracing::error!(
+                        error = %re,
+                        order_id = %order_id,
+                        "compensation rollback FAILED after production IN ledger-row lookup (cost pinning) error — stock_ledger may be inconsistent for this order"
+                    );
+                }
                 return Err(e.into());
             }
         };
@@ -962,14 +990,21 @@ pub async fn produce(
                 .execute(pool)
                 .await
                 {
-                    let _ = rollback_production_movements(
+                    if let Err(re) = rollback_production_movements(
                         pool,
                         company_id,
                         &order_id,
                         &affected_products,
                         &input.gestiune_id,
                     )
-                    .await;
+                    .await
+                    {
+                        tracing::error!(
+                            error = %re,
+                            order_id = %order_id,
+                            "compensation rollback FAILED after stock_ledger value patch (cost pinning) error — stock_ledger may be inconsistent for this order"
+                        );
+                    }
                     return Err(e.into());
                 }
 
@@ -986,14 +1021,21 @@ pub async fn produce(
                 let stock_account = match stock_account_lookup {
                     Ok(opt) => opt.unwrap_or_else(|| "345".to_string()),
                     Err(e) => {
-                        let _ = rollback_production_movements(
+                        if let Err(re) = rollback_production_movements(
                             pool,
                             company_id,
                             &order_id,
                             &affected_products,
                             &input.gestiune_id,
                         )
-                        .await;
+                        .await
+                        {
+                            tracing::error!(
+                                error = %re,
+                                order_id = %order_id,
+                                "compensation rollback FAILED after stock-account lookup (GL re-post) error — stock_ledger may be inconsistent for this order"
+                            );
+                        }
                         return Err(e.into());
                     }
                 };
@@ -1010,14 +1052,21 @@ pub async fn produce(
                 )
                 .await
                 {
-                    let _ = rollback_production_movements(
+                    if let Err(re) = rollback_production_movements(
                         pool,
                         company_id,
                         &order_id,
                         &affected_products,
                         &input.gestiune_id,
                     )
-                    .await;
+                    .await
+                    {
+                        tracing::error!(
+                            error = %re,
+                            order_id = %order_id,
+                            "compensation rollback FAILED after GL re-post (post_stock_movement) error — stock_ledger may be inconsistent for this order"
+                        );
+                    }
                     return Err(e);
                 }
 
@@ -1036,14 +1085,21 @@ pub async fn produce(
                 let sv_opt = match sv_lookup {
                     Ok(r) => r,
                     Err(e) => {
-                        let _ = rollback_production_movements(
+                        if let Err(re) = rollback_production_movements(
                             pool,
                             company_id,
                             &order_id,
                             &affected_products,
                             &input.gestiune_id,
                         )
-                        .await;
+                        .await
+                        {
+                            tracing::error!(
+                                error = %re,
+                                order_id = %order_id,
+                                "compensation rollback FAILED after product stock_value lookup (cache sync) error — stock_ledger may be inconsistent for this order"
+                            );
+                        }
                         return Err(e.into());
                     }
                 };
@@ -1059,14 +1115,21 @@ pub async fn produce(
                         .execute(pool)
                         .await
                 {
-                    let _ = rollback_production_movements(
+                    if let Err(re) = rollback_production_movements(
                         pool,
                         company_id,
                         &order_id,
                         &affected_products,
                         &input.gestiune_id,
                     )
-                    .await;
+                    .await
+                    {
+                        tracing::error!(
+                            error = %re,
+                            order_id = %order_id,
+                            "compensation rollback FAILED after product stock_value update (cache sync) error — stock_ledger may be inconsistent for this order"
+                        );
+                    }
                     return Err(e.into());
                 }
             }
@@ -1134,14 +1197,21 @@ pub async fn produce(
     .await;
 
     if let Err(e) = insert_res {
-        let _ = rollback_production_movements(
+        if let Err(re) = rollback_production_movements(
             pool,
             company_id,
             &order_id,
             &affected_products,
             &input.gestiune_id,
         )
-        .await;
+        .await
+        {
+            tracing::error!(
+                error = %re,
+                order_id = %order_id,
+                "compensation rollback FAILED after productie_orders INSERT error — stock_ledger may be inconsistent for this order"
+            );
+        }
         return Err(e.into());
     }
 
@@ -1523,14 +1593,21 @@ async fn execute_produce_inner(
         };
 
         if let Err(e) = stock_valuation::record_movement(pool, &out_input, Dir::Out).await {
-            let _ = rollback_production_movements(
+            if let Err(re) = rollback_production_movements(
                 pool,
                 company_id,
                 order_id,
                 &affected_products,
                 &input.gestiune_id,
             )
-            .await;
+            .await
+            {
+                tracing::error!(
+                    error = %re,
+                    order_id = %order_id,
+                    "compensation rollback FAILED after component stock OUT (record_movement) error — stock_ledger may be inconsistent for this order"
+                );
+            }
             return Err(e);
         }
     }
@@ -1547,14 +1624,21 @@ async fn execute_produce_inner(
     {
         Ok(rows) => rows.iter().map(|(v,)| dec(v)).sum(),
         Err(e) => {
-            let _ = rollback_production_movements(
+            if let Err(re) = rollback_production_movements(
                 pool,
                 company_id,
                 order_id,
                 &affected_products,
                 &input.gestiune_id,
             )
-            .await;
+            .await
+            {
+                tracing::error!(
+                    error = %re,
+                    order_id = %order_id,
+                    "compensation rollback FAILED after material-cost aggregation query error — stock_ledger may be inconsistent for this order"
+                );
+            }
             return Err(e.into());
         }
     };
@@ -1593,14 +1677,21 @@ async fn execute_produce_inner(
     };
 
     if let Err(e) = stock_valuation::record_movement(pool, &in_input, Dir::In).await {
-        let _ = rollback_production_movements(
+        if let Err(re) = rollback_production_movements(
             pool,
             company_id,
             order_id,
             &affected_products,
             &input.gestiune_id,
         )
-        .await;
+        .await
+        {
+            tracing::error!(
+                error = %re,
+                order_id = %order_id,
+                "compensation rollback FAILED after finished-good stock IN (record_movement) error — stock_ledger may be inconsistent for this order"
+            );
+        }
         return Err(e);
     }
 
@@ -1623,14 +1714,21 @@ async fn execute_produce_inner(
         let prod_in_row = match prod_in_lookup {
             Ok(r) => r,
             Err(e) => {
-                let _ = rollback_production_movements(
+                if let Err(re) = rollback_production_movements(
                     pool,
                     company_id,
                     order_id,
                     &affected_products,
                     &input.gestiune_id,
                 )
-                .await;
+                .await
+                {
+                    tracing::error!(
+                        error = %re,
+                        order_id = %order_id,
+                        "compensation rollback FAILED after production IN ledger-row lookup (cost pinning) error — stock_ledger may be inconsistent for this order"
+                    );
+                }
                 return Err(e.into());
             }
         };
@@ -1652,14 +1750,21 @@ async fn execute_produce_inner(
                 .execute(pool)
                 .await
                 {
-                    let _ = rollback_production_movements(
+                    if let Err(re) = rollback_production_movements(
                         pool,
                         company_id,
                         order_id,
                         &affected_products,
                         &input.gestiune_id,
                     )
-                    .await;
+                    .await
+                    {
+                        tracing::error!(
+                            error = %re,
+                            order_id = %order_id,
+                            "compensation rollback FAILED after stock_ledger value patch (cost pinning) error — stock_ledger may be inconsistent for this order"
+                        );
+                    }
                     return Err(e.into());
                 }
 
@@ -1675,14 +1780,21 @@ async fn execute_produce_inner(
                 let stock_account = match stock_account_lookup {
                     Ok(opt) => opt.unwrap_or_else(|| "345".to_string()),
                     Err(e) => {
-                        let _ = rollback_production_movements(
+                        if let Err(re) = rollback_production_movements(
                             pool,
                             company_id,
                             order_id,
                             &affected_products,
                             &input.gestiune_id,
                         )
-                        .await;
+                        .await
+                        {
+                            tracing::error!(
+                                error = %re,
+                                order_id = %order_id,
+                                "compensation rollback FAILED after stock-account lookup (GL re-post) error — stock_ledger may be inconsistent for this order"
+                            );
+                        }
                         return Err(e.into());
                     }
                 };
@@ -1699,14 +1811,21 @@ async fn execute_produce_inner(
                 )
                 .await
                 {
-                    let _ = rollback_production_movements(
+                    if let Err(re) = rollback_production_movements(
                         pool,
                         company_id,
                         order_id,
                         &affected_products,
                         &input.gestiune_id,
                     )
-                    .await;
+                    .await
+                    {
+                        tracing::error!(
+                            error = %re,
+                            order_id = %order_id,
+                            "compensation rollback FAILED after GL re-post (post_stock_movement) error — stock_ledger may be inconsistent for this order"
+                        );
+                    }
                     return Err(e);
                 }
 
@@ -1721,14 +1840,21 @@ async fn execute_produce_inner(
                 let sv_opt = match sv_lookup {
                     Ok(r) => r,
                     Err(e) => {
-                        let _ = rollback_production_movements(
+                        if let Err(re) = rollback_production_movements(
                             pool,
                             company_id,
                             order_id,
                             &affected_products,
                             &input.gestiune_id,
                         )
-                        .await;
+                        .await
+                        {
+                            tracing::error!(
+                                error = %re,
+                                order_id = %order_id,
+                                "compensation rollback FAILED after product stock_value lookup (cache sync) error — stock_ledger may be inconsistent for this order"
+                            );
+                        }
                         return Err(e.into());
                     }
                 };
@@ -1744,14 +1870,21 @@ async fn execute_produce_inner(
                         .execute(pool)
                         .await
                 {
-                    let _ = rollback_production_movements(
+                    if let Err(re) = rollback_production_movements(
                         pool,
                         company_id,
                         order_id,
                         &affected_products,
                         &input.gestiune_id,
                     )
-                    .await;
+                    .await
+                    {
+                        tracing::error!(
+                            error = %re,
+                            order_id = %order_id,
+                            "compensation rollback FAILED after product stock_value update (cache sync) error — stock_ledger may be inconsistent for this order"
+                        );
+                    }
                     return Err(e.into());
                 }
             }
@@ -1782,14 +1915,21 @@ async fn execute_produce_inner(
     .await;
 
     if let Err(e) = update_res {
-        let _ = rollback_production_movements(
+        if let Err(re) = rollback_production_movements(
             pool,
             company_id,
             order_id,
             &affected_products,
             &input.gestiune_id,
         )
-        .await;
+        .await
+        {
+            tracing::error!(
+                error = %re,
+                order_id = %order_id,
+                "compensation rollback FAILED after productie_orders finalize UPDATE error — stock_ledger may be inconsistent for this order"
+            );
+        }
         return Err(e.into());
     }
 

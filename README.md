@@ -2,7 +2,7 @@
 
 **Clarito** este o aplicație desktop nativă pentru contabilitate și raportare fiscală românească: emite și trimite facturi electronice prin SPV, ține contabilitatea în partidă dublă și generează declarațiile ANAF (D300, D390, D394, D112, D205, D406 SAF-T, bilanț), totul **local**, fără backend cloud propriu. Construită cu **Tauri 2 + React 19 + Rust + SQLite**.
 
-> Versiune: **0.7.0** · Bundle id: `com.lucaris.efactura` · Licență: Proprietary © Lucaris
+> Versiune: vezi [CHANGELOG](CHANGELOG.md) · Bundle id: `com.lucaris.efactura` · Licență: Proprietary © Lucaris
 
 ---
 

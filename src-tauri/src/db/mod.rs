@@ -74,92 +74,123 @@ pub mod vat_rates;
 // production failure until almost shipping.
 #[cfg(test)]
 mod no_inline_test_schema {
-    /// Tables defined in migrations/ (derive this list by grepping migrations/ for
-    /// `CREATE TABLE`).  Only list "real" tables (exclude *_new temporaries used
-    /// during schema rebuilds and *_v view aliases).
-    const MIGRATION_TABLES: &[&str] = &[
-        "account_mapping",
-        "advance_invoice_settlements",
-        "advance_received_settlements",
-        "asset_depreciation",
-        "aviz_lines",
-        "avize",
-        "dezmembrare_lines",
-        "dezmembrari",
-        "asset_transactions",
-        "audit_archive",
-        "audit_log",
-        "bank_accounts",
-        "bank_statements",
-        "bank_transactions",
-        "bom",
-        "bom_lines",
-        "certificates",
-        "chart_of_accounts",
-        "companies",
-        "contacts",
-        "contracts",
-        "declaration_filings",
-        "dividends",
-        "employees",
-        "etransport_declarations",
-        "expense_lines",
-        "expense_reports",
-        "fiscal_receipt_invoice_links",
-        "fiscal_receipt_vat_lines",
-        "fiscal_receipts",
-        "fixed_assets",
-        "fx_revaluation",
-        "gestiune",
-        "gl_entry",
-        "gl_journal",
-        "import_batch",
-        "import_staging_account",
-        "import_staging_contact",
-        "import_staging_invoice",
-        "import_staging_invoice_line",
-        "import_staging_product",
-        "inventory_lines",
-        "inventory_sessions",
-        "invoice_events",
-        "invoice_line_items",
+    use std::collections::BTreeSet;
+
+    /// Tables that exist in migrations/ but are intentionally NOT guarded.
+    /// Keep this empty unless a table genuinely must be exempt (document why).
+    const EXCLUDED_TABLES: &[&str] = &[];
+
+    /// Sentinel tables that MUST be present in the derived set.  If the
+    /// migration parser ever breaks (e.g. an SQL style change), the derived
+    /// set would silently shrink and the guard would stop protecting tables —
+    /// these assertions turn that into a loud test failure instead.
+    const SENTINEL_TABLES: &[&str] = &[
         "invoices",
-        "license",
-        "medical_leaves",
-        "nir_documents",
-        "nir_lines",
-        "notifications",
-        "order_lines",
-        "orders",
-        "payment_instruments",
         "payments",
-        "payroll_config",
-        "payroll_extra_income",
-        "payroll_retineri",
-        "payroll_sporuri",
-        "period_locks",
-        "pontaje",
-        "product_groups",
         "productie_orders",
-        "products",
-        "quote_lines",
-        "quotes",
-        "receipts",
-        "received_invoice_payments",
-        "received_invoice_vat_lines",
-        "received_invoices",
-        "recurring_invoices",
-        "registru_inventar_entries",
-        "secondary_offices",
-        "settings",
-        "stock_ledger",
-        "stock_movement_lines",
-        "stock_movements",
-        "stock_transfers",
-        "treasury_advances",
-        "users",
-        "vat_rates",
+        // Newest tables (migrations 0082+) that the old hand-maintained list
+        // was missing — keep them here so a regression is caught immediately.
+        "asset_revaluations",
+        "fx_treasury_revaluation",
+        "accruals",
+        "provisions",
+        "capital_goods",
+        "capital_good_adjustments",
     ];
+
+    /// Derive the set of migration-managed tables at test runtime by scanning
+    /// `migrations/*.sql` for `CREATE TABLE` names.  Replaces the old
+    /// hand-maintained list, which had drifted (6 newest tables missing).
+    ///
+    /// Exclusions:
+    /// - `*_new` temporaries used during schema rebuilds;
+    /// - tables consumed by `ALTER TABLE <old> RENAME TO <new>` (the `<old>`
+    ///   name no longer exists after the migration runs);
+    /// - anything in [`EXCLUDED_TABLES`].
+    fn migration_tables() -> BTreeSet<String> {
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let migrations_dir = std::path::PathBuf::from(manifest_dir).join("migrations");
+
+        let mut created: BTreeSet<String> = BTreeSet::new();
+        let mut renamed_away: BTreeSet<String> = BTreeSet::new();
+
+        let entries = std::fs::read_dir(&migrations_dir)
+            .unwrap_or_else(|e| panic!("cannot read {}: {e}", migrations_dir.display()));
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().map(|e| e == "sql").unwrap_or(false) {
+                let content = std::fs::read_to_string(&path)
+                    .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
+                scan_migration_sql(&content, &mut created, &mut renamed_away);
+            }
+        }
+
+        // `ALTER TABLE old RENAME TO new` sources are gone after migration.
+        for gone in &renamed_away {
+            created.remove(gone);
+        }
+        // Defensive: `*_new` rebuild temporaries never survive migrations.
+        created.retain(|t| !t.ends_with("_new"));
+        for excluded in EXCLUDED_TABLES {
+            created.remove(*excluded);
+        }
+        created
+    }
+
+    /// Extract `CREATE TABLE` names and `ALTER TABLE ... RENAME TO` sources
+    /// from one migration file's SQL text.
+    fn scan_migration_sql(
+        content: &str,
+        created: &mut BTreeSet<String>,
+        renamed_away: &mut BTreeSet<String>,
+    ) {
+        for line in content.lines() {
+            let upper = line.trim().to_uppercase();
+
+            if let Some(idx) = upper.find("CREATE TABLE") {
+                let after = upper[idx + "CREATE TABLE".len()..].trim_start();
+                let after = after.strip_prefix("IF NOT EXISTS").unwrap_or(after);
+                if let Some(name) = first_identifier(after) {
+                    created.insert(name);
+                }
+            }
+
+            // `ALTER TABLE <old> RENAME TO <new>` — but NOT `RENAME COLUMN x TO y`.
+            if upper.contains("ALTER TABLE")
+                && upper.contains("RENAME TO")
+                && !upper.contains("RENAME COLUMN")
+            {
+                if let Some(idx) = upper.find("ALTER TABLE") {
+                    let after = upper[idx + "ALTER TABLE".len()..].trim_start();
+                    if let Some(old) = first_identifier(after) {
+                        renamed_away.insert(old);
+                    }
+                }
+                // The rename target exists post-migration; record it as created.
+                if let Some(idx) = upper.find("RENAME TO") {
+                    let after = upper[idx + "RENAME TO".len()..].trim_start();
+                    if let Some(new) = first_identifier(after) {
+                        created.insert(new);
+                    }
+                }
+            }
+        }
+    }
+
+    /// First SQL identifier in `s` (lowercased), tolerating leading
+    /// whitespace and quote characters.
+    fn first_identifier(s: &str) -> Option<String> {
+        let s = s.trim_start().trim_start_matches(['"', '`', '\'', '[']);
+        let name: String = s
+            .chars()
+            .take_while(|c| c.is_alphanumeric() || *c == '_')
+            .collect();
+        if name.is_empty() {
+            None
+        } else {
+            Some(name.to_lowercase())
+        }
+    }
 
     /// Pre-existing known violations that have not yet been migrated to
     /// sqlx::migrate!.  Keyed as `("src/path/relative/to/src-tauri", "table")`.
@@ -178,35 +209,63 @@ mod no_inline_test_schema {
         let manifest_dir = env!("CARGO_MANIFEST_DIR");
         let src_dir = PathBuf::from(manifest_dir).join("src");
 
+        // Derive the guarded table set from migrations/ so newly added tables
+        // are protected automatically (no hand-maintained list to go stale).
+        let tables = migration_tables();
+        for sentinel in SENTINEL_TABLES {
+            assert!(
+                tables.contains(*sentinel),
+                "migration-table derivation lost sentinel table `{}` — the SQL \
+                 parser in migration_tables() no longer matches migrations/*.sql.\n\
+                 Derived set ({} tables): {:?}",
+                sentinel,
+                tables.len(),
+                tables
+            );
+        }
+
         let mut violations: Vec<String> = Vec::new();
-        collect_violations(&src_dir, manifest_dir, &mut violations);
+        collect_violations(&src_dir, manifest_dir, &tables, &mut violations);
 
         assert!(
             violations.is_empty(),
             "NEW hand-rolled CREATE TABLE for migration-managed tables found in #[cfg(test)] code.\n\
              Switch these fixtures to sqlx::migrate!(\"./migrations\").run(&pool) instead.\n\
-             Do NOT add them to KNOWN_REMAINING — fix them:\n\n{}",
-            violations.join("\n")
+             Do NOT add them to KNOWN_REMAINING — fix them:\n\n{}\n\n\
+             Guarded tables derived from migrations/ ({}): {:?}",
+            violations.join("\n"),
+            tables.len(),
+            tables
         );
     }
 
     /// Walk `dir` recursively, scanning each .rs file for inline CREATE TABLE
     /// statements that appear inside a `#[cfg(test)]` section.
-    fn collect_violations(dir: &std::path::Path, crate_root: &str, violations: &mut Vec<String>) {
+    fn collect_violations(
+        dir: &std::path::Path,
+        crate_root: &str,
+        tables: &BTreeSet<String>,
+        violations: &mut Vec<String>,
+    ) {
         let Ok(entries) = std::fs::read_dir(dir) else {
             return;
         };
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_dir() {
-                collect_violations(&path, crate_root, violations);
+                collect_violations(&path, crate_root, tables, violations);
             } else if path.extension().map(|e| e == "rs").unwrap_or(false) {
-                scan_file(&path, crate_root, violations);
+                scan_file(&path, crate_root, tables, violations);
             }
         }
     }
 
-    fn scan_file(path: &std::path::Path, crate_root: &str, violations: &mut Vec<String>) {
+    fn scan_file(
+        path: &std::path::Path,
+        crate_root: &str,
+        tables: &BTreeSet<String>,
+        violations: &mut Vec<String>,
+    ) {
         let Ok(content) = std::fs::read_to_string(path) else {
             return;
         };
@@ -248,7 +307,7 @@ mod no_inline_test_schema {
                     .next()
                     .unwrap_or("")
                     .to_lowercase();
-                if MIGRATION_TABLES.contains(&table_name.as_str()) {
+                if tables.contains(&table_name) {
                     // Skip pre-existing known violations (ratchet).
                     let is_known = KNOWN_REMAINING
                         .iter()
