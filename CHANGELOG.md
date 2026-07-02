@@ -2,6 +2,19 @@
 
 Toate modificările notabile ale Clarito (fost RoFactura). Format: [Keep a Changelog](https://keepachangelog.com), versionare [SemVer](https://semver.org).
 
+## [0.7.5] - 2026-07-02
+
+### Corectat
+- e-Factura: facturile intracomunitare (K) emit din nou codul de TVA al cumpărătorului (BT-48, regresie v0.7.4); preflight pentru adresa cumpărătorului (BR-RO-080/090/110); categoriile deduse respectă întâi statutul de neplătitor (O); prefixe de țară normalizate la majuscule; județele Dâmbovița/Vâlcea recunoscute corect.
+- e-Transport: câmpurile obligatorii (stradă, organizator) în UI + validare locală; atributele goale nu se mai emit (XSD).
+- TVA: decontul trimestrial/semestrial/anual exportă întreaga perioadă; rd.28 populat; fereastra memoriului TVA la încasare ancorată pe factura sursă.
+- Salarizare: impozitul pe indemnizația de concediu medical se declară corect și cu diurnă în exces; suma netaxabilă condiționată de salariul de bază egal cu minimul; plafonul deducerii include venitul asimilat.
+- Contabilitate: perimetrul de imutabilitate complet — stornare bon fiscal, creare/ștergere plăți, ștergeri (accruals/provizioane/bunuri de capital/dividende/avansuri/instrumente de plată/note manuale) refuză lunile blocate; plățile pe facturi respinse nu se mai postează.
+- Importuri: extrasele MT940 în RON se importă corect; totalurile WinMentor pe facturile primite; deduplicare pe furnizor; moneda contului bancar respectată; potrivirea referințelor pe număr întreg.
+- Dividende: scutirea art. 43 alin. (4) pentru PJ rezidente (participație ≥10%, ≥1 an); rând informativ cod 631 pentru nerezidenți.
+- Securitate: restaurarea din backup limitată la roluri cu drept de ștergere; escapare HTML în printuri.
+- Interfață: vizualizatorul PDF lizibil pe tema întunecată; 5 pagini traduse complet în engleză; gestionarea focusului în dialoguri; facturile recurente respectă blocarea cotelor TVA expirate; fereastra se restaurează din Dock (macOS); iconiță de tray vizibilă pe Windows.
+
 ## [0.7.4] - 2026-07-02
 
 Audit final de publicare (11 dimensiuni): remedierea celor două blocante P0 (e-Factura pentru neplătitori de TVA + OAuth pe Windows) plus corecții fiscale D300/SAF-T și completarea blocajelor de perioadă.
