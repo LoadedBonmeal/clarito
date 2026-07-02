@@ -48,6 +48,76 @@ fn dec(s: &str) -> Decimal {
     Decimal::from_str(s.trim()).unwrap_or(Decimal::ZERO)
 }
 
+// ─── Reference ↔ invoice-number matching (FIX 7) ─────────────────────────────
+
+/// Does the bank reference plausibly cite this invoice number?
+///
+/// The old raw `contains()` on the composed "SERIES NUMBER" string fabricated
+/// HIGH confidence: a short number like "77" matched digit runs embedded in
+/// IBANs, phone numbers, or unrelated document ids, and separator variance
+/// ("FF-77" vs "FF 77") made genuine citations miss. Rules now:
+///   • the invoice number's numeric part (its LAST maximal digit-run) must have
+///     >= 2 digits to qualify for a HIGH upgrade at all;
+///   • that digit-run must appear in the reference as a STANDALONE digit-run —
+///     bounded by non-digits or the string ends (a word-boundary match on the
+///     digits), compared exactly or with leading zeros stripped from BOTH sides
+///     (the zero-stripped form still requires >= 2 digits in the reference);
+///   • separators between series and number are irrelevant: "FF77", "FF-77",
+///     "FF 77", "FF/77" all expose the same standalone digit-run "77".
+fn reference_matches_number(reference: &str, full_number: &str) -> bool {
+    // Numeric part = the LAST maximal digit-run of the invoice number
+    // ("F2026-001" → "001"; "FF 77" → "77"). No digits → nothing to match
+    // (this also covers the empty-number case: contains("") was always true).
+    let num = {
+        let mut last: Option<String> = None;
+        let mut cur = String::new();
+        for ch in full_number.chars() {
+            if ch.is_ascii_digit() {
+                cur.push(ch);
+            } else if !cur.is_empty() {
+                last = Some(std::mem::take(&mut cur));
+            }
+        }
+        if !cur.is_empty() {
+            last = Some(cur);
+        }
+        match last {
+            Some(n) => n,
+            None => return false,
+        }
+    };
+    if num.len() < 2 {
+        return false; // single-digit numbers are too ambiguous for HIGH
+    }
+    let num_stripped = num.trim_start_matches('0');
+
+    let run_matches = |run: &str| -> bool {
+        if run.is_empty() {
+            return false;
+        }
+        if run == num {
+            return true;
+        }
+        // Zero-padding tolerance ("001" ↔ "01"), still word-bounded and still
+        // requiring at least 2 digits on the reference side.
+        run.len() >= 2 && !num_stripped.is_empty() && run.trim_start_matches('0') == num_stripped
+    };
+
+    // Scan the reference's maximal digit-runs.
+    let mut cur = String::new();
+    for ch in reference.chars() {
+        if ch.is_ascii_digit() {
+            cur.push(ch);
+        } else {
+            if run_matches(&cur) {
+                return true;
+            }
+            cur.clear();
+        }
+    }
+    run_matches(&cur)
+}
+
 // ─── Main suggestion function ─────────────────────────────────────────────────
 
 /// Build match suggestions for one bank transaction (no DB writes).
@@ -148,16 +218,13 @@ pub async fn suggest_matches(
                 continue;
             }
 
-            // Text signals for HIGH confidence
+            // Text signals for HIGH confidence. FIX 7: word-boundary digit-run
+            // match instead of a raw substring test (see reference_matches_number).
             let ref_match = txn_reference
                 .map(|r| {
-                    let r_up = r.to_uppercase();
                     full_number
-                        .as_ref()
-                        // Guard an empty number: contains("") is always true and would
-                        // fabricate HIGH confidence.
-                        .filter(|n| !n.trim().is_empty())
-                        .map(|n| r_up.contains(&n.to_uppercase()))
+                        .as_deref()
+                        .map(|n| reference_matches_number(r, n))
                         .unwrap_or(false)
                 })
                 .unwrap_or(false);
@@ -259,15 +326,12 @@ pub async fn suggest_matches(
                 continue;
             }
 
+            // FIX 7: same word-boundary digit-run rule for the outgoing direction.
             let ref_match = txn_reference
                 .map(|r| {
-                    let r_up = r.to_uppercase();
                     full_number
-                        .as_ref()
-                        // Guard an empty number: contains("") is always true and would
-                        // fabricate HIGH confidence.
-                        .filter(|n| !n.trim().is_empty())
-                        .map(|n| r_up.contains(&n.to_uppercase()))
+                        .as_deref()
+                        .map(|n| reference_matches_number(r, n))
                         .unwrap_or(false)
                 })
                 .unwrap_or(false);
@@ -508,6 +572,105 @@ mod tests {
         assert!(sugg.len() >= 2);
         // HIGH confidence suggestion must come first
         assert_eq!(sugg[0].confidence, MatchConfidence::High);
+    }
+
+    // ── FIX 7: word-boundary digit-run reference matching ─────────────────────
+
+    #[test]
+    fn reference_match_separator_variants_normalised() {
+        // "FF77" / "FF-77" / "FF 77" / "FF/77" all cite invoice FF 77.
+        assert!(reference_matches_number("Plata FF77", "FF 77"));
+        assert!(reference_matches_number("Plata FF-77", "FF 77"));
+        assert!(reference_matches_number("Plata FF 77", "FF 77"));
+        assert!(reference_matches_number("Plata FF/77", "FF 77"));
+        assert!(reference_matches_number("PlataFF77 diverse", "FF 77"));
+    }
+
+    #[test]
+    fn reference_match_rejects_embedded_digit_runs() {
+        // "77" embedded inside a longer number (IBAN fragment, phone, doc id)
+        // must NOT count — the old substring test fabricated HIGH here.
+        assert!(!reference_matches_number("Plata RO12779900 diverse", "77"));
+        assert!(!reference_matches_number("REF 500377", "FF 77"));
+        assert!(!reference_matches_number("Plata 1449", "FF 44"));
+    }
+
+    #[test]
+    fn reference_match_requires_two_digits_for_high() {
+        // Single-digit numbers are too ambiguous for a HIGH upgrade.
+        assert!(!reference_matches_number("Plata factura F-1", "F-1"));
+        assert!(!reference_matches_number("Plata factura 1", "1"));
+        // Two digits qualify again.
+        assert!(reference_matches_number("Plata factura 17", "AA-17"));
+    }
+
+    #[test]
+    fn reference_match_zero_padding_tolerated() {
+        // "001" ↔ "01" style padding differences still match (word-bounded).
+        assert!(reference_matches_number(
+            "Incasare factura F2026-001",
+            "F2026-001"
+        ));
+        assert!(reference_matches_number("factura nr 077", "FF 77"));
+        assert!(reference_matches_number("factura nr 01", "F2026-001"));
+        // But a bare single digit on the reference side stays excluded.
+        assert!(!reference_matches_number("factura nr 1", "F2026-001"));
+    }
+
+    #[test]
+    fn reference_match_empty_or_digitless_number_never_matches() {
+        assert!(!reference_matches_number("Plata 77", ""));
+        assert!(!reference_matches_number("Plata ABC", "ABC"));
+    }
+
+    /// End-to-end: a received invoice with a bare number "77" (no series) must NOT
+    /// get HIGH confidence from a reference whose digits merely EMBED "77" —
+    /// the old raw substring test fabricated HIGH here.
+    #[tokio::test]
+    async fn suggest_no_high_from_embedded_digit_run() {
+        let pool = pool().await;
+        // Bare number, no series → composed full_number is just "77".
+        sqlx::query(
+            "INSERT INTO received_invoices \
+             (id, company_id, anaf_download_id, anaf_index, issuer_cui, issuer_name, \
+              series, number, total_amount, net_amount, vat_amount, currency, exchange_rate, \
+              issue_date, xml_path, pdf_path, status, is_advance, downloaded_at, created_at) \
+             VALUES ('ri-bare','co','DL-bare',NULL,'RO11223342','FURNIZOR SRL', \
+                     NULL,'77','800.00','800.00','0','RON',NULL,'2026-01-05','','','APPROVED',0,0,0)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let amount = Decimal::from_str("-800.00").unwrap();
+        // Reference contains "77" only embedded in a longer digit run.
+        let sugg = suggest_matches(
+            &pool,
+            "co",
+            &amount,
+            "RON",
+            Some("Plata RO12779900 diverse"),
+            None,
+        )
+        .await
+        .unwrap();
+
+        let hit = sugg
+            .iter()
+            .find(|s| s.invoice_id == "ri-bare")
+            .expect("amount still matches → suggestion exists");
+        assert_eq!(
+            hit.confidence,
+            MatchConfidence::Low,
+            "an embedded digit run must not fabricate HIGH confidence"
+        );
+
+        // Control: a genuine standalone citation still gives HIGH.
+        let sugg2 = suggest_matches(&pool, "co", &amount, "RON", Some("Plata fact 77"), None)
+            .await
+            .unwrap();
+        let hit2 = sugg2.iter().find(|s| s.invoice_id == "ri-bare").unwrap();
+        assert_eq!(hit2.confidence, MatchConfidence::High);
     }
 
     /// Wave 4 audit: matching must be currency-aware — a EUR bank transaction must never

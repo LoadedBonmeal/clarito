@@ -22,7 +22,7 @@ use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 
 use super::matching::{suggest_matches, MatchSuggestion};
-use super::parser::BankStatementParser;
+use super::parser::{BankStatementParser, ParsedTxn};
 
 // ─── Content hash ─────────────────────────────────────────────────────────────
 
@@ -246,44 +246,33 @@ pub async fn import_bank_statement(
     .execute(&state.db)
     .await?;
 
-    let mut imported = 0usize;
-    for txn in &parsed.txns {
-        // Per-transaction dedup by txn_hash within this statement
-        let exists: Option<i64> = sqlx::query_scalar(
-            "SELECT 1 FROM bank_transactions \
-             WHERE statement_id = ?1 AND txn_hash = ?2 LIMIT 1",
-        )
-        .bind(&stmt_id)
-        .bind(&txn.txn_hash)
-        .fetch_optional(&state.db)
-        .await?;
-        if exists.is_some() {
-            continue;
+    // FIX 5: parsers that could not read a currency from the file mark their
+    // txns with an EMPTY currency (CSV always; MT940 when :60F:/:62F: carried
+    // none). Resolve those from the linked bank account's currency so foreign
+    // accounts keep currency-aware matching; fall back to RON otherwise.
+    // CAMT053 carries the Ccy attribute per amount, so its txns stay explicit.
+    let account_currency: Option<String> = match &bank_account_id {
+        Some(acct_id) => {
+            sqlx::query_scalar(
+                "SELECT currency FROM bank_accounts \
+                 WHERE id = ?1 AND company_id = ?2 LIMIT 1",
+            )
+            .bind(acct_id)
+            .bind(&company_id)
+            .fetch_optional(&state.db)
+            .await?
         }
+        None => None,
+    };
 
-        let txn_id = new_id();
-        sqlx::query(
-            "INSERT INTO bank_transactions \
-             (id, statement_id, company_id, booking_date, value_date, amount, currency, \
-              counterparty_name, counterparty_iban, counterparty_cui, reference, txn_hash) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
-        )
-        .bind(&txn_id)
-        .bind(&stmt_id)
-        .bind(&company_id)
-        .bind(&txn.booking_date)
-        .bind(&txn.value_date)
-        .bind(txn.amount.to_string())
-        .bind(&txn.currency)
-        .bind(&txn.counterparty_name)
-        .bind(&txn.counterparty_iban)
-        .bind(&txn.counterparty_cui)
-        .bind(&txn.reference)
-        .bind(&txn.txn_hash)
-        .execute(&state.db)
-        .await?;
-        imported += 1;
-    }
+    let imported = insert_parsed_txns(
+        &state.db,
+        &stmt_id,
+        &company_id,
+        &parsed.txns,
+        account_currency.as_deref(),
+    )
+    .await?;
 
     let stmt = sqlx::query_as::<_, BankStatement>(
         "SELECT id, company_id, bank_account_id, source_format, statement_ref, \
@@ -301,6 +290,79 @@ pub async fn import_bank_statement(
         warnings: parsed.warnings,
         integrity_ok: parsed.integrity_ok,
     })
+}
+
+/// Insert parsed transactions for a freshly created statement.
+///
+/// FIX 4: the old per-statement `txn_hash` dedup silently DROPPED legitimate
+/// identical transactions — two equal bank fees or two identical POS
+/// settlements on the same day share (date, amount, reference) and therefore
+/// the same hash, so one vanished while `integrity_ok` stayed true. File-level
+/// re-import is already handled by `content_hash` on the statement, so
+/// intra-statement dedup is never desirable: instead, count the occurrences of
+/// each hash and give the 2nd, 3rd… occurrence a sequence-suffixed hash so
+/// every parsed transaction imports as its own row (the UNIQUE(statement_id,
+/// txn_hash) constraint stays satisfied).
+///
+/// FIX 5: a txn whose parser could not determine the currency (empty marker)
+/// gets the linked bank account's currency, falling back to RON.
+pub(crate) async fn insert_parsed_txns(
+    db: &sqlx::SqlitePool,
+    stmt_id: &str,
+    company_id: &str,
+    txns: &[ParsedTxn],
+    account_currency: Option<&str>,
+) -> AppResult<usize> {
+    let mut occurrences: std::collections::HashMap<&str, u32> = std::collections::HashMap::new();
+    let mut imported = 0usize;
+
+    for txn in txns {
+        let seen = occurrences.entry(txn.txn_hash.as_str()).or_insert(0);
+        let hash = if *seen == 0 {
+            txn.txn_hash.clone()
+        } else {
+            format!("{}-{}", txn.txn_hash, *seen)
+        };
+        *seen += 1;
+
+        let currency = {
+            let c = txn.currency.trim();
+            if c.is_empty() {
+                account_currency
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or("RON")
+                    .to_string()
+            } else {
+                c.to_string()
+            }
+        };
+
+        let txn_id = new_id();
+        sqlx::query(
+            "INSERT INTO bank_transactions \
+             (id, statement_id, company_id, booking_date, value_date, amount, currency, \
+              counterparty_name, counterparty_iban, counterparty_cui, reference, txn_hash) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+        )
+        .bind(&txn_id)
+        .bind(stmt_id)
+        .bind(company_id)
+        .bind(&txn.booking_date)
+        .bind(&txn.value_date)
+        .bind(txn.amount.to_string())
+        .bind(&currency)
+        .bind(&txn.counterparty_name)
+        .bind(&txn.counterparty_iban)
+        .bind(&txn.counterparty_cui)
+        .bind(&txn.reference)
+        .bind(&hash)
+        .execute(db)
+        .await?;
+        imported += 1;
+    }
+
+    Ok(imported)
 }
 
 // ─── list_bank_statements ─────────────────────────────────────────────────────
@@ -800,6 +862,111 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(s, "IGNORED");
+    }
+
+    // ── FIX 4: two genuinely identical txns must BOTH import ──────────────────
+
+    fn make_parsed_txn(amount: &str, reference: &str) -> super::ParsedTxn {
+        use super::super::parser::txn_hash;
+        let amt = Decimal::from_str(amount).unwrap();
+        super::ParsedTxn {
+            booking_date: "2026-01-15".into(),
+            value_date: None,
+            amount: amt,
+            currency: "RON".into(),
+            counterparty_name: None,
+            counterparty_iban: None,
+            counterparty_cui: None,
+            reference: Some(reference.to_string()),
+            txn_hash: txn_hash("2026-01-15", &amt, Some(reference)),
+        }
+    }
+
+    #[tokio::test]
+    async fn identical_txns_in_one_statement_both_imported() {
+        let pool = pool().await;
+        seed_stmt(&pool, "stmt4", "hash4").await;
+
+        // Two genuinely identical lines (same date/amount/reference — e.g. two
+        // equal bank fees on the same day). The parser gives them the SAME hash.
+        let t1 = make_parsed_txn("-15.50", "Comision administrare");
+        let t2 = make_parsed_txn("-15.50", "Comision administrare");
+        assert_eq!(t1.txn_hash, t2.txn_hash, "precondition: identical hashes");
+
+        let imported = insert_parsed_txns(&pool, "stmt4", "co", &[t1, t2], None)
+            .await
+            .unwrap();
+        assert_eq!(imported, 2, "both identical txns must import (FIX 4)");
+
+        let count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM bank_transactions WHERE statement_id='stmt4'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(count, 2, "both rows must be in the DB");
+
+        // Hashes are occurrence-suffixed → distinct in the DB.
+        let distinct: i64 = sqlx::query_scalar(
+            "SELECT COUNT(DISTINCT txn_hash) FROM bank_transactions WHERE statement_id='stmt4'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(distinct, 2, "occurrence-aware hashes must differ");
+    }
+
+    // ── FIX 5: parser-defaulted currency resolved from the bank account ──────
+
+    #[tokio::test]
+    async fn empty_txn_currency_resolved_from_bank_account() {
+        let pool = pool().await;
+        seed_stmt(&pool, "stmt5", "hash5").await;
+        seed_stmt(&pool, "stmt6", "hash6").await;
+
+        // CSV-style txn: the parser could not determine the currency.
+        let mut t = make_parsed_txn("100.00", "Incasare");
+        t.currency = String::new();
+
+        // With a EUR bank account → EUR.
+        insert_parsed_txns(&pool, "stmt5", "co", &[t.clone()], Some("EUR"))
+            .await
+            .unwrap();
+        let cur: String =
+            sqlx::query_scalar("SELECT currency FROM bank_transactions WHERE statement_id='stmt5'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(cur, "EUR", "empty currency must resolve to the account's");
+
+        // Without an account → RON fallback.
+        insert_parsed_txns(&pool, "stmt6", "co", &[t], None)
+            .await
+            .unwrap();
+        let cur2: String =
+            sqlx::query_scalar("SELECT currency FROM bank_transactions WHERE statement_id='stmt6'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(cur2, "RON", "no account → RON fallback");
+    }
+
+    #[tokio::test]
+    async fn explicit_txn_currency_not_overridden_by_account() {
+        // MT940/CAMT with an explicit file currency must keep it even when the
+        // linked account says something else.
+        let pool = pool().await;
+        seed_stmt(&pool, "stmt7", "hash7").await;
+
+        let t = make_parsed_txn("100.00", "Incasare"); // currency: RON (explicit)
+        insert_parsed_txns(&pool, "stmt7", "co", &[t], Some("EUR"))
+            .await
+            .unwrap();
+        let cur: String =
+            sqlx::query_scalar("SELECT currency FROM bank_transactions WHERE statement_id='stmt7'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(cur, "RON", "file-carried currency wins over the account's");
     }
 
     // ── Dedup txn_hash within statement ──────────────────────────────────────

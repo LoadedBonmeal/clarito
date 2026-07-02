@@ -37,9 +37,11 @@
 //! valid Romanian diacritics (ă â î ș ț — both comma-below and cedilla variants)
 //! across the sample, disqualifying any record containing U+FFFD. The highest score
 //! wins; a tie keeps the earlier candidate (CP852, the SAGA MS-DOS default — see
-//! `pick_dbf_encoding` for the 0xEE 'ţ'↔'î' ambiguity rationale). If no candidate
-//! scores at all (e.g. an ASCII-only file), it falls through to the crate default
-//! (`UnicodeLossy`, i.e. UTF-8 with lossy replacement — the pre-fix behavior).
+//! `pick_dbf_encoding` for the 0xEE 'ţ'↔'î' ambiguity rationale). If the head sample
+//! scores 0 everywhere but the record area contains non-ASCII bytes (ASCII-leading
+//! file with diacritics only in later records), the picker re-scores over ALL records
+//! before conceding; only a genuinely diacritic-free file falls through to the crate
+//! default (`UnicodeLossy`, i.e. UTF-8 with lossy replacement — harmless for ASCII).
 //!
 //! This heuristic is documented here rather than trusted blindly — a real export
 //! file should be tested to confirm (see `pick_dbf_encoding`/`open_dbf_reader`). The
@@ -289,26 +291,60 @@ fn record_ro_score(record: &Record) -> Option<usize> {
 /// strictly lower whenever the text has more than the ambiguous î/ţ (0xEE) overlap.
 /// Returns `None` if the reader can't even be opened under this encoding.
 fn score_candidate(bytes: &[u8], cp: DbfCodePage) -> Option<usize> {
+    score_candidate_sampled(bytes, cp, SAMPLE_SIZE)
+}
+
+fn score_candidate_sampled(bytes: &[u8], cp: DbfCodePage, sample: usize) -> Option<usize> {
     let mut reader = open_reader_with(bytes, cp).ok()?;
     let score = reader
         .iter_records()
-        .take(SAMPLE_SIZE)
+        .take(sample)
         .filter_map(|r| r.ok())
         .filter_map(|record| record_ro_score(&record))
         .sum();
     Some(score)
 }
 
+/// Does the RECORD AREA of the DBF (after the header, whose length sits at bytes 8..10
+/// little-endian) contain any non-ASCII byte? An ASCII-leading file whose first
+/// `SAMPLE_SIZE` records carry no diacritics scores 0 under every candidate, but a
+/// high byte later in the file means the lossy UTF-8 fallback would corrupt real
+/// diacritics — so the picker must widen its sample instead of giving up.
+fn record_area_has_high_bytes(bytes: &[u8]) -> bool {
+    let header_len = bytes
+        .get(8..10)
+        .map(|b| u16::from_le_bytes([b[0], b[1]]) as usize)
+        .unwrap_or(0);
+    bytes
+        .get(header_len..)
+        .unwrap_or(bytes)
+        .iter()
+        .any(|b| *b >= 0x80)
+}
+
 /// Pick the best-scoring codepage for this DBF file by sampling up to `SAMPLE_SIZE`
 /// records under each candidate in turn (see the module-level comment above for the
-/// full rationale). Returns `None` if every candidate scores 0 (falls back to UTF-8
-/// lossy, the pre-fix default, at the call site).
+/// full rationale). If every candidate scores 0 on the head sample BUT the record area
+/// contains non-ASCII bytes (diacritics appearing only after the sampled records),
+/// re-scores over ALL records before conceding. Returns `None` only when the file is
+/// genuinely diacritic-free (falls back to UTF-8 lossy, the pre-fix default, at the
+/// call site — harmless for pure-ASCII data).
 fn pick_dbf_encoding(bytes: &[u8]) -> Option<DbfCodePage> {
+    pick_dbf_encoding_sampled(bytes, SAMPLE_SIZE).or_else(|| {
+        if record_area_has_high_bytes(bytes) {
+            pick_dbf_encoding_sampled(bytes, usize::MAX)
+        } else {
+            None
+        }
+    })
+}
+
+fn pick_dbf_encoding_sampled(bytes: &[u8], sample: usize) -> Option<DbfCodePage> {
     let candidates = [DbfCodePage::Cp852, DbfCodePage::Cp1250, DbfCodePage::Utf8];
 
     let mut best: Option<(DbfCodePage, usize)> = None;
     for cp in candidates {
-        let Some(score) = score_candidate(bytes, cp) else {
+        let Some(score) = score_candidate_sampled(bytes, cp, sample) else {
             continue;
         };
         if score == 0 {
@@ -945,6 +981,42 @@ mod tests {
             matches!(chosen, Some(DbfCodePage::Cp852)),
             "a genuinely CP852-encoded file must be detected as CP852"
         );
+    }
+
+    /// ASCII-leading file: the first SAMPLE_SIZE records carry no diacritics, the first
+    /// one appears at record SAMPLE_SIZE+4. The head sample scores 0 everywhere, but the
+    /// record area contains high bytes — the picker must widen to a full scan and still
+    /// detect CP852 instead of falling back to lossy UTF-8 (which would corrupt 'ţ').
+    #[test]
+    fn pick_dbf_encoding_widens_sample_for_ascii_leading_file() {
+        let fields = ["DENUMIRE"];
+        let mut rows: Vec<Vec<(&str, &str)>> = (0..SAMPLE_SIZE + 3)
+            .map(|_| vec![("DENUMIRE", "SC ASCII ONLY SRL")])
+            .collect();
+        rows.push(vec![("DENUMIRE", "Constanţa")]);
+        let bytes = write_dbf_cp852(&fields, rows);
+
+        assert!(
+            record_area_has_high_bytes(&bytes),
+            "fixture must contain a non-ASCII byte past the head sample"
+        );
+        let chosen = pick_dbf_encoding(&bytes);
+        assert!(
+            matches!(chosen, Some(DbfCodePage::Cp852)),
+            "ASCII-leading CP852 file must widen the sample, not fall back lossy: got {chosen:?}"
+        );
+    }
+
+    /// Pure-ASCII file: no high bytes anywhere → the picker returns None and the caller
+    /// falls back to the crate default, which is harmless for ASCII-only data.
+    #[test]
+    fn pick_dbf_encoding_ascii_only_file_still_falls_back() {
+        let fields = ["DENUMIRE"];
+        let rows = vec![vec![("DENUMIRE", "SC ASCII ONLY SRL")]];
+        let bytes = write_dbf_cp852(&fields, rows);
+
+        assert!(!record_area_has_high_bytes(&bytes));
+        assert!(pick_dbf_encoding(&bytes).is_none());
     }
 
     #[test]

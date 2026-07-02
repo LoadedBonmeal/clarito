@@ -19,6 +19,7 @@
 //!   • resolution REVIEW | ERROR | DUP_IN_BATCH → SKIP, left for user.
 //!   • resolution NEW + per-row create fn error → catch, set ERROR, continue.
 
+use rust_decimal::Decimal;
 use tauri::State;
 
 use crate::db::models::{new_id, now_unix, ContactType};
@@ -694,6 +695,26 @@ async fn commit_invoices(
     .fetch_all(pool)
     .await?;
 
+    // FIX 6 / FIX 2: staged-article VAT lookup by product code. WinMentor stages
+    // line vat_rate as None (the rate lives on the ARTICLE's ProcTVA), so the
+    // commit engine must resolve it from the staged product in the same batch
+    // instead of silently assuming 0% / category 'Z'.
+    let product_rows: Vec<(Option<String>, Option<String>, Option<String>)> = sqlx::query_as(
+        "SELECT code, vat_rate, vat_category FROM import_staging_product WHERE batch_id = ?1",
+    )
+    .bind(batch_id)
+    .fetch_all(pool)
+    .await?;
+    let mut product_vat_by_code: std::collections::HashMap<
+        String,
+        (Option<String>, Option<String>),
+    > = std::collections::HashMap::new();
+    for (code, vr, vc) in product_rows {
+        if let Some(c) = code.map(|c| c.trim().to_string()).filter(|c| !c.is_empty()) {
+            product_vat_by_code.entry(c).or_insert((vr, vc));
+        }
+    }
+
     for (
         staging_id,
         resolution,
@@ -743,7 +764,8 @@ async fn commit_invoices(
             None
         };
 
-        // Fetch lines for this invoice.
+        // Fetch lines for this invoice (product_code included so a NULL line
+        // vat_rate can be resolved from the staged article — FIX 6 / FIX 2).
         let lines: Vec<(
             Option<String>,
             Option<String>,
@@ -751,8 +773,9 @@ async fn commit_invoices(
             Option<String>,
             Option<String>,
             Option<String>,
+            Option<String>,
         )> = sqlx::query_as(
-            "SELECT name, quantity, unit, unit_price, vat_rate, vat_category \
+            "SELECT name, quantity, unit, unit_price, vat_rate, vat_category, product_code \
              FROM import_staging_invoice_line \
              WHERE invoice_staging_id = ?1 ORDER BY position",
         )
@@ -815,46 +838,79 @@ async fn commit_invoices(
                     };
                 let create_lines: Vec<invoices::CreateLineInput> = lines
                     .into_iter()
-                    .filter_map(|(name, qty, unit, price, vat_rate, vat_cat)| {
-                        let n = name?.trim().to_string();
-                        if n.is_empty() {
-                            return None;
-                        }
-                        let quantity = parse_line_num(
-                            qty.as_deref(),
-                            format!("cantitate (linia \"{n}\")"),
-                            1.0,
-                            &mut line_warnings,
-                        );
-                        let unit_price = parse_line_num(
-                            price.as_deref(),
-                            format!("preț unitar (linia \"{n}\")"),
-                            0.0,
-                            &mut line_warnings,
-                        );
-                        let vat = parse_line_num(
-                            vat_rate.as_deref(),
-                            format!("cotă TVA (linia \"{n}\")"),
-                            0.0,
-                            &mut line_warnings,
-                        );
-                        let cat = vat_cat
-                            .as_deref()
-                            .unwrap_or(if vat > 0.0 { "S" } else { "Z" })
-                            .to_string();
-                        Some(invoices::CreateLineInput {
-                            name: n,
-                            description: None,
-                            quantity,
-                            unit: unit.unwrap_or_else(|| "buc".into()),
-                            unit_price,
-                            vat_rate: vat,
-                            vat_category: cat,
-                            cpv_code: None,
-                            art331_code: None,
-                            revenue_kind: None,
-                        })
-                    })
+                    .filter_map(
+                        |(name, qty, unit, price, vat_rate, vat_cat, product_code)| {
+                            let n = name?.trim().to_string();
+                            if n.is_empty() {
+                                return None;
+                            }
+                            let quantity = parse_line_num(
+                                qty.as_deref(),
+                                format!("cantitate (linia \"{n}\")"),
+                                1.0,
+                                &mut line_warnings,
+                            );
+                            let unit_price = parse_line_num(
+                                price.as_deref(),
+                                format!("preț unitar (linia \"{n}\")"),
+                                0.0,
+                                &mut line_warnings,
+                            );
+                            // FIX 6: a NULL/empty line vat_rate is NOT a 0% line —
+                            // WinMentor keeps the rate on the article (ProcTVA), so
+                            // fall back to the staged product of the same batch (by
+                            // product_code) before ever considering a default; when
+                            // the rate is still unresolved, warn instead of silently
+                            // committing 0% / category 'Z'.
+                            let staged_rate = vat_rate
+                                .as_deref()
+                                .map(str::trim)
+                                .filter(|s| !s.is_empty())
+                                .map(str::to_string);
+                            let (rate_source, cat_from_product) = match staged_rate {
+                                Some(r) => (Some(r), None),
+                                None => match product_code
+                                    .as_deref()
+                                    .map(str::trim)
+                                    .filter(|s| !s.is_empty())
+                                    .and_then(|pc| product_vat_by_code.get(pc))
+                                {
+                                    Some((Some(r), vc)) => (Some(r.clone()), vc.clone()),
+                                    _ => (None, None),
+                                },
+                            };
+                            let vat = match rate_source {
+                                Some(r) => parse_line_num(
+                                    Some(&r),
+                                    format!("cotă TVA (linia \"{n}\")"),
+                                    0.0,
+                                    &mut line_warnings,
+                                ),
+                                None => {
+                                    line_warnings.push(format!(
+                                        "cotă TVA necunoscută — verificați linia \"{n}\""
+                                    ));
+                                    0.0
+                                }
+                            };
+                            let cat = vat_cat
+                                .or(cat_from_product)
+                                .filter(|c| !c.trim().is_empty())
+                                .unwrap_or_else(|| (if vat > 0.0 { "S" } else { "Z" }).to_string());
+                            Some(invoices::CreateLineInput {
+                                name: n,
+                                description: None,
+                                quantity,
+                                unit: unit.unwrap_or_else(|| "buc".into()),
+                                unit_price,
+                                vat_rate: vat,
+                                vat_category: cat,
+                                cpv_code: None,
+                                art331_code: None,
+                                revenue_kind: None,
+                            })
+                        },
+                    )
                     .collect();
                 for w in line_warnings {
                     report

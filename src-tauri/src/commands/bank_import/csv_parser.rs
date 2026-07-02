@@ -346,7 +346,11 @@ pub fn parse_csv(bytes: &[u8]) -> AppResult<ParsedStatement> {
 
     let mut txns: Vec<ParsedTxn> = Vec::new();
     let mut statement_date = String::new();
-    let currency = "RON".to_string(); // CSV rarely specifies currency
+    // FIX 5: CSV layouts don't carry a currency column — the old hardcoded "RON"
+    // broke currency-aware matching for foreign-currency accounts. Emit an EMPTY
+    // currency marker so the import command resolves it from the linked bank
+    // account (falling back to RON only when no account is linked).
+    let currency = String::new();
 
     for (lineno, line) in data_lines.iter().enumerate() {
         let line = line.trim();
@@ -449,7 +453,9 @@ pub fn parse_csv(bytes: &[u8]) -> AppResult<ParsedStatement> {
         statement_date,
         opening_balance: Decimal::ZERO,
         closing_balance: Decimal::ZERO,
-        currency,
+        // Statement-level metadata keeps the RON default for display; the
+        // per-txn currency stays "" for account-level resolution (FIX 5).
+        currency: "RON".to_string(),
         txns,
         warnings,
         integrity_ok: None, // CSV does not carry balances in the standard layouts
@@ -651,6 +657,18 @@ mod tests {
         assert_eq!(
             parse_amount("1.234,56").unwrap(),
             Decimal::from_str("1234.56").unwrap()
+        );
+    }
+
+    // ── FIX 5: CSV txns carry an EMPTY currency marker ───────────────────────
+
+    #[test]
+    fn csv_txn_currency_empty_for_account_resolution() {
+        let stmt = parse_csv(CSV_SIGNED.as_bytes()).unwrap();
+        assert!(
+            stmt.txns.iter().all(|t| t.currency.is_empty()),
+            "CSV carries no currency — txns must be marked empty so the import \
+             command resolves the bank account's currency"
         );
     }
 

@@ -570,6 +570,7 @@ async fn resolve_invoices(pool: &SqlitePool, batch_id: &str, company_id: &str) -
             company_id,
             &direction,
             &external_id,
+            &partner_cui,
             &series,
             &number,
             &raw_json,
@@ -621,11 +622,13 @@ fn compute_invoice_dedup_key(
     format!("{}|{}|{}|{}|{}", dir, cui, ser, num, date)
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn find_live_invoice(
     pool: &SqlitePool,
     company_id: &str,
     direction: &str,
     external_id: &Option<String>,
+    partner_cui: &Option<String>,
     series: &Option<String>,
     number: &Option<String>,
     raw_json: &str,
@@ -698,18 +701,64 @@ async fn find_live_invoice(
                 }
             }
 
-            // Also match by number (invoice number stored in `number` column of received_invoices).
-            if let Some(ref num) = number {
-                let matched: Option<String> = sqlx::query_scalar(
-                    "SELECT id FROM received_invoices \
-                     WHERE company_id = ?1 AND number = ?2 LIMIT 1",
-                )
-                .bind(company_id)
-                .bind(num.trim())
-                .fetch_optional(pool)
-                .await?;
-                if matched.is_some() {
-                    return Ok(matched);
+            // Also match by number (invoice number stored in `number` column of
+            // received_invoices). FIX 3: supplier document numbers are only unique
+            // PER SUPPLIER — a bare `number = ?` match silently dropped a distinct
+            // invoice whenever two suppliers happened to reuse the same number. The
+            // fallback is therefore constrained to the SAME issuer (matching the
+            // staged partner CUI in its raw / canonical / RO-prefixed forms) and is
+            // SKIPPED entirely when the staged partner CUI is unknown (importing a
+            // potential duplicate beats silently dropping a real invoice). When the
+            // staged row carries a series, a same-series live row is preferred.
+            if let Some(num_t) = number.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+                let cui_raw = partner_cui.as_deref().map(str::trim).unwrap_or("");
+                let cui_canon = super::canonical_cui(cui_raw);
+                if !cui_canon.is_empty() {
+                    let cui_ro = format!("RO{cui_canon}");
+                    let ser_t = series.as_deref().map(str::trim).filter(|s| !s.is_empty());
+
+                    // When both sides carry a series it must agree; a staged series
+                    // may still match a live row that has NO series (older imports),
+                    // but never a live row with a DIFFERENT series.
+                    let series_filters: &[&str] = match ser_t {
+                        Some(_) => &["same", "empty"],
+                        None => &["any"],
+                    };
+                    for filter in series_filters {
+                        let sql = match *filter {
+                            "same" => {
+                                "SELECT id FROM received_invoices \
+                                 WHERE company_id = ?1 AND number = ?2 \
+                                   AND TRIM(UPPER(COALESCE(issuer_cui,''))) IN (UPPER(?3), UPPER(?4), UPPER(?5)) \
+                                   AND TRIM(COALESCE(series,'')) = ?6 LIMIT 1"
+                            }
+                            "empty" => {
+                                "SELECT id FROM received_invoices \
+                                 WHERE company_id = ?1 AND number = ?2 \
+                                   AND TRIM(UPPER(COALESCE(issuer_cui,''))) IN (UPPER(?3), UPPER(?4), UPPER(?5)) \
+                                   AND TRIM(COALESCE(series,'')) = '' LIMIT 1"
+                            }
+                            _ => {
+                                "SELECT id FROM received_invoices \
+                                 WHERE company_id = ?1 AND number = ?2 \
+                                   AND TRIM(UPPER(COALESCE(issuer_cui,''))) IN (UPPER(?3), UPPER(?4), UPPER(?5)) \
+                                 LIMIT 1"
+                            }
+                        };
+                        let mut q = sqlx::query_scalar::<_, String>(sql)
+                            .bind(company_id)
+                            .bind(num_t)
+                            .bind(cui_raw)
+                            .bind(&cui_canon)
+                            .bind(&cui_ro);
+                        if *filter == "same" {
+                            q = q.bind(ser_t.unwrap_or(""));
+                        }
+                        let matched: Option<String> = q.fetch_optional(pool).await?;
+                        if matched.is_some() {
+                            return Ok(matched);
+                        }
+                    }
                 }
             }
         }
@@ -806,4 +855,154 @@ async fn set_invoice_resolution(
     .execute(pool)
     .await?;
     Ok(())
+}
+
+// ─── Tests ───────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    async fn test_pool() -> SqlitePool {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+        sqlx::query(
+            "INSERT INTO companies (id, cui, legal_name, address, city, county, country) \
+             VALUES ('co','RO12345674','Test SRL','Str 1','Cluj','CJ','RO')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        pool
+    }
+
+    async fn seed_received(
+        pool: &SqlitePool,
+        id: &str,
+        number: &str,
+        issuer_cui: &str,
+        series: Option<&str>,
+    ) {
+        sqlx::query(
+            "INSERT INTO received_invoices \
+             (id, company_id, anaf_download_id, anaf_index, issuer_cui, issuer_name, \
+              series, number, total_amount, net_amount, vat_amount, currency, exchange_rate, \
+              issue_date, xml_path, pdf_path, status, is_advance, downloaded_at, created_at) \
+             VALUES (?1,'co',?2,NULL,?3,'FURNIZOR SRL', \
+                     ?4,?5,'800.00','800.00','0','RON',NULL,'2026-01-05','','','APPROVED',0,0,0)",
+        )
+        .bind(id)
+        .bind(format!("DL-{id}"))
+        .bind(issuer_cui)
+        .bind(series)
+        .bind(number)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    async fn find_received(
+        pool: &SqlitePool,
+        partner_cui: Option<&str>,
+        series: Option<&str>,
+        number: &str,
+    ) -> Option<String> {
+        find_live_invoice(
+            pool,
+            "co",
+            "RECEIVED",
+            &None,
+            &partner_cui.map(str::to_string),
+            &series.map(str::to_string),
+            &Some(number.to_string()),
+            r#"{"never":"hashes-to-anything-live"}"#,
+        )
+        .await
+        .unwrap()
+    }
+
+    /// FIX 3: the RECEIVED number-only fallback matched ACROSS suppliers —
+    /// two suppliers reusing the same document number collided and the second
+    /// distinct invoice was silently dropped as MATCH. Same number + DIFFERENT
+    /// issuer must NOT match.
+    #[tokio::test]
+    async fn received_number_fallback_requires_same_issuer() {
+        let pool = test_pool().await;
+        seed_received(&pool, "ri1", "77", "RO111", None).await;
+
+        // Different issuer CUI → NOT matched (distinct invoice, must import).
+        assert_eq!(
+            find_received(&pool, Some("222"), None, "77").await,
+            None,
+            "same number from a DIFFERENT supplier must not match"
+        );
+
+        // Same issuer (canonical staged form vs RO-prefixed live form) → matched.
+        assert_eq!(
+            find_received(&pool, Some("111"), None, "77")
+                .await
+                .as_deref(),
+            Some("ri1"),
+            "staged canonical CUI must match the RO-prefixed live issuer_cui"
+        );
+
+        // RO-prefixed staged form matches a live canonical form too.
+        seed_received(&pool, "ri2", "88", "333", None).await;
+        assert_eq!(
+            find_received(&pool, Some("RO333"), None, "88")
+                .await
+                .as_deref(),
+            Some("ri2")
+        );
+    }
+
+    /// FIX 3: when the staged partner CUI is unknown the fallback is skipped
+    /// entirely — importing a potential duplicate beats silently dropping a
+    /// distinct supplier invoice.
+    #[tokio::test]
+    async fn received_number_fallback_skipped_without_partner_cui() {
+        let pool = test_pool().await;
+        seed_received(&pool, "ri1", "77", "RO111", None).await;
+
+        assert_eq!(
+            find_received(&pool, None, None, "77").await,
+            None,
+            "no staged partner CUI → no number-only fallback"
+        );
+        assert_eq!(
+            find_received(&pool, Some("  "), None, "77").await,
+            None,
+            "blank staged partner CUI → no number-only fallback"
+        );
+    }
+
+    /// FIX 3: when BOTH sides carry a series it must agree; a staged series may
+    /// still match a live row with NO series, but never a different one.
+    #[tokio::test]
+    async fn received_series_must_agree_when_both_present() {
+        let pool = test_pool().await;
+        seed_received(&pool, "ri-gg", "99", "RO111", Some("GG")).await;
+        seed_received(&pool, "ri-none", "99", "RO444", None).await;
+
+        // Different series, same number + issuer → no match.
+        assert_eq!(
+            find_received(&pool, Some("111"), Some("FF"), "99").await,
+            None,
+            "a staged FF series must not match a live GG row"
+        );
+        // Same series → match.
+        assert_eq!(
+            find_received(&pool, Some("111"), Some("GG"), "99")
+                .await
+                .as_deref(),
+            Some("ri-gg")
+        );
+        // Staged series vs live row without one → match (older imports).
+        assert_eq!(
+            find_received(&pool, Some("444"), Some("FF"), "99")
+                .await
+                .as_deref(),
+            Some("ri-none")
+        );
+    }
 }

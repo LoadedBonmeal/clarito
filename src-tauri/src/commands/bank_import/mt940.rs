@@ -144,7 +144,7 @@ fn parse_61(content: &str) -> Option<(String, String, bool, Decimal)> {
 
     let mut pos = 6usize;
 
-    // Optional 4-digit booking date MMDD (same year)
+    // Optional 4-digit booking date MMDD
     let booking_date = if pos + 4 <= s.len()
         && s[pos..pos + 4].chars().all(|c| c.is_ascii_digit())
         && !s[pos..].starts_with(['C', 'D', 'R'])
@@ -152,7 +152,20 @@ fn parse_61(content: &str) -> Option<(String, String, bool, Decimal)> {
         let bm: u32 = s[pos..pos + 2].parse().ok()?;
         let bd: u32 = s[pos + 2..pos + 4].parse().ok()?;
         pos += 4;
-        format!("{year:04}-{bm:02}-{bd:02}")
+        // FIX 8: the booking MMDD carries no year — inheriting the value date's
+        // year verbatim puts a Dec-30 booking on a Jan-05 value date a YEAR ahead.
+        // Standard SWIFT rule: the booking date is near the value date, so a
+        // booking month >6 months AFTER the value month means the PRIOR year
+        // (value Jan / booking Dec), and >6 months BEFORE means the NEXT year
+        // (value Dec / booking Jan).
+        let booking_year = if bm as i32 - mm as i32 > 6 {
+            year - 1
+        } else if mm as i32 - bm as i32 > 6 {
+            year + 1
+        } else {
+            year
+        };
+        format!("{booking_year:04}-{bm:02}-{bd:02}")
     } else {
         value_date.clone()
     };
@@ -174,10 +187,20 @@ fn parse_61(content: &str) -> Option<(String, String, bool, Decimal)> {
         return None;
     };
 
-    // Optional 1-letter fund code (not 'N' which starts NREF)
+    // Optional 1-letter funds code (3rd letter of the currency — 'N' for RON).
+    // FIX 1: the old `ch != b'N'` guard (meant to avoid eating an "NREF"/"NTRF"
+    // reference prefix) also refused RON's own funds code 'N', so the 'N' fell
+    // into the amount parse and EVERY RON transaction failed. Instead, skip the
+    // letter exactly when the NEXT byte starts the amount (an ASCII digit or a
+    // comma) — a reference prefix like "NTRF" is followed by another letter, so
+    // it is never consumed, while "DN449,77" correctly skips the 'N'.
     if pos < s.len() {
-        let ch = s.as_bytes().get(pos).copied().unwrap_or(0);
-        if ch.is_ascii_alphabetic() && ch != b'N' {
+        let ch = s.as_bytes()[pos];
+        if ch.is_ascii_alphabetic()
+            && s.as_bytes()
+                .get(pos + 1)
+                .is_some_and(|b| b.is_ascii_digit() || *b == b',')
+        {
             pos += 1;
         }
     }
@@ -303,7 +326,11 @@ pub fn parse_mt940(bytes: &[u8]) -> AppResult<ParsedStatement> {
     let mut statement_date = String::new();
     let mut opening_balance = Decimal::ZERO;
     let mut closing_balance = Decimal::ZERO;
-    let mut currency = "RON".to_string();
+    // FIX 5: track whether the FILE carried a currency (in :60F:/:62F:). When it
+    // did not, transactions are emitted with an EMPTY currency so the import
+    // command can resolve it from the linked bank account (instead of a silent
+    // RON default that breaks currency-aware matching for foreign accounts).
+    let mut currency: Option<String> = None;
     let mut txns: Vec<ParsedTxn> = Vec::new();
     let mut warnings: Vec<String> = Vec::new();
 
@@ -349,14 +376,14 @@ pub fn parse_mt940(bytes: &[u8]) -> AppResult<ParsedStatement> {
                         statement_date = date;
                     }
                     if !cur.is_empty() {
-                        currency = cur;
+                        currency = Some(cur);
                     }
                 }
             }
             "61" => {
                 // Flush pending (no following :86:)
                 if let Some(p) = pending.take() {
-                    flush_pending(p, None, &mut txns, &currency);
+                    flush_pending(p, None, &mut txns, currency.as_deref().unwrap_or(""));
                 }
                 match parse_61(content) {
                     Some((vd, bd, _cr, amt)) => {
@@ -376,7 +403,12 @@ pub fn parse_mt940(bytes: &[u8]) -> AppResult<ParsedStatement> {
             }
             "86" => {
                 if let Some(p) = pending.take() {
-                    flush_pending(p, Some(content.trim().to_string()), &mut txns, &currency);
+                    flush_pending(
+                        p,
+                        Some(content.trim().to_string()),
+                        &mut txns,
+                        currency.as_deref().unwrap_or(""),
+                    );
                 }
                 // If no pending :61:, this is a statement-level :86: — ignore.
             }
@@ -386,8 +418,8 @@ pub fn parse_mt940(bytes: &[u8]) -> AppResult<ParsedStatement> {
                     if statement_date.is_empty() {
                         statement_date = date;
                     }
-                    if !cur.is_empty() && currency == "RON" {
-                        currency = cur;
+                    if !cur.is_empty() && currency.is_none() {
+                        currency = Some(cur);
                     }
                 }
             }
@@ -397,7 +429,7 @@ pub fn parse_mt940(bytes: &[u8]) -> AppResult<ParsedStatement> {
 
     // Flush any trailing :61: with no following :86:
     if let Some(p) = pending.take() {
-        flush_pending(p, None, &mut txns, &currency);
+        flush_pending(p, None, &mut txns, currency.as_deref().unwrap_or(""));
     }
 
     let integrity_ok = check_integrity(opening_balance, closing_balance, &txns);
@@ -413,7 +445,9 @@ pub fn parse_mt940(bytes: &[u8]) -> AppResult<ParsedStatement> {
         statement_date,
         opening_balance,
         closing_balance,
-        currency,
+        // Statement-level metadata keeps the RON default for display; the
+        // per-txn currency stays "" when the file carried none (see FIX 5).
+        currency: currency.unwrap_or_else(|| "RON".to_string()),
         txns,
         warnings,
         integrity_ok,
@@ -518,5 +552,95 @@ mod tests {
     fn mt940_dedup_hash_differs_for_different_txns() {
         let stmt = parse_mt940(FIXTURE.as_bytes()).unwrap();
         assert_ne!(stmt.txns[0].txn_hash, stmt.txns[1].txn_hash);
+    }
+
+    // ── FIX 1: RON funds code 'N' must not break the amount parse ────────────
+
+    #[test]
+    fn mt940_ron_funds_code_n_parses_amount() {
+        // "DN449,77NTRFNONREF": D = debit, N = RON funds code, 449,77 = amount,
+        // NTRF... = reference. The old parser refused to skip 'N' (to protect
+        // "NREF") so the amount parse started at 'N' and failed → the whole RON
+        // statement imported 0 transactions.
+        let (value_date, booking_date, is_credit, amount) =
+            parse_61("2601050105DN449,77NTRFNONREF").expect("RON :61: line must parse");
+        assert_eq!(value_date, "2026-01-05");
+        assert_eq!(booking_date, "2026-01-05");
+        assert!(!is_credit);
+        assert_eq!(amount, Decimal::from_str("-449.77").unwrap());
+        assert_eq!(amount.abs(), Decimal::from_str("449.77").unwrap());
+    }
+
+    #[test]
+    fn mt940_ron_statement_with_funds_code_imports_txns() {
+        let input = ":20:REF\r\n\
+:60F:C260101RON1000,00\r\n\
+:61:2601050105DN449,77NTRFNONREF\r\n\
+:86:Plata furnizor CUI:12345678\r\n\
+:62F:C260105RON550,23\r\n";
+        let stmt = parse_mt940(input.as_bytes()).unwrap();
+        assert_eq!(stmt.txns.len(), 1, "RON txn with funds code 'N' must parse");
+        assert_eq!(stmt.txns[0].amount, Decimal::from_str("-449.77").unwrap());
+        assert_eq!(stmt.integrity_ok, Some(true));
+    }
+
+    #[test]
+    fn mt940_reference_prefix_ntrf_not_consumed_as_funds_code() {
+        // No funds code: the amount directly follows D/C, and the reference
+        // starts with "NTRF" — the letter-skip must not eat into the reference.
+        let (_, _, _, amount) = parse_61("2601010101C500,00NTRFREF001").unwrap();
+        assert_eq!(amount, Decimal::from_str("500").unwrap());
+    }
+
+    // ── FIX 8: booking-date year across the Dec/Jan boundary ─────────────────
+
+    #[test]
+    fn mt940_booking_date_december_on_january_value_date_uses_prior_year() {
+        // Value date 2026-01-05, booking MMDD 1230 → booking is 2025-12-30,
+        // NOT 2026-12-30 (a year in the future).
+        let (value_date, booking_date, _, _) =
+            parse_61("2601051230D100,00NTRF").expect("must parse");
+        assert_eq!(value_date, "2026-01-05");
+        assert_eq!(booking_date, "2025-12-30");
+    }
+
+    #[test]
+    fn mt940_booking_date_january_on_december_value_date_uses_next_year() {
+        // Mirror direction: value date 2026-12-30, booking MMDD 0102 → 2027-01-02.
+        let (value_date, booking_date, _, _) =
+            parse_61("2612300102C100,00NTRF").expect("must parse");
+        assert_eq!(value_date, "2026-12-30");
+        assert_eq!(booking_date, "2027-01-02");
+    }
+
+    #[test]
+    fn mt940_booking_date_same_month_keeps_year() {
+        let (_, booking_date, _, _) = parse_61("2601050106C100,00NTRF").unwrap();
+        assert_eq!(booking_date, "2026-01-06");
+    }
+
+    // ── FIX 5: currency explicitness marker ──────────────────────────────────
+
+    #[test]
+    fn mt940_txn_currency_explicit_when_file_carries_it() {
+        let stmt = parse_mt940(FIXTURE.as_bytes()).unwrap();
+        assert_eq!(stmt.txns[0].currency, "RON", ":60F: carried RON");
+    }
+
+    #[test]
+    fn mt940_txn_currency_empty_when_file_carries_none() {
+        // :60F: without a 3-letter currency → txns marked with "" so the import
+        // command can resolve the currency from the linked bank account.
+        let input = ":20:REF\r\n\
+:60F:C2601011000,00\r\n\
+:61:2601050105DN449,77NTRFNONREF\r\n\
+:86:Plata furnizor\r\n";
+        let stmt = parse_mt940(input.as_bytes()).unwrap();
+        assert_eq!(stmt.txns.len(), 1);
+        assert_eq!(
+            stmt.txns[0].currency, "",
+            "no currency in the file → empty marker for account-level resolution"
+        );
+        assert_eq!(stmt.currency, "RON", "statement metadata keeps RON default");
     }
 }
