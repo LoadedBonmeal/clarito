@@ -22,6 +22,13 @@ pub struct D101ExportParams {
     /// `true` → scrie fișierul chiar dacă DUK raportează erori (pentru debugging / override manual).
     #[serde(default)]
     pub skip_duk_override: bool,
+    /// W8-3: evidența „originală vs. rectificativă" pentru filing-ul înregistrat local. Explicită,
+    /// pentru că pentru an ≥ 2024 atributul XML `d_rec` este o constantă structurală a dicționarului
+    /// v10 (mereu 2, verificat cu DUK-ul real — vezi `anaf_decl::d101_xml`) și NU mai poate semnala
+    /// rectificativa; derivarea veche `header.d_rec != 0` ar fi marcat GREȘIT orice depunere
+    /// originală ≥2024 drept rectificativă. Implicit `false` (declarație originală).
+    #[serde(default)]
+    pub is_rectificative: bool,
 }
 
 /// Construiește XML-ul D101 fără a-l scrie pe disc — pentru previzualizare în vizualizatorul
@@ -73,7 +80,10 @@ pub async fn export_d101_xml(
             company_id: params.company_id.clone(),
             kind: "D101".into(),
             period: format!("{:04}-{:02}", params.header.an, params.header.luna),
-            is_rectificative: params.header.d_rec != 0,
+            // W8-3: flag explicit, NU derivat din header.d_rec — pentru ≥2024 XML-ul poartă
+            // obligatoriu d_rec=2 (constantă v10), deci `d_rec != 0` ar marca originalele
+            // drept rectificative.
+            is_rectificative: params.is_rectificative,
             file_path: Some(dest.to_string_lossy().to_string()),
         },
     )

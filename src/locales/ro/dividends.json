@@ -19,6 +19,8 @@
     "beneficiaryCountryHint": "Cod ISO de 2 litere (ex. GB, DE, FR) — câmpul Stat_R din D207. Obligatoriu pentru nerezidenți.",
     "beneficiaryForeignTaxId": "NIF / cod fiscal străin (D207)",
     "beneficiaryForeignTaxIdHint": "Numărul de identificare fiscală din țara de rezidență (câmpul cifS din D207). Opțional.",
+    "exemptArt434": "Scutit art. 43 alin. (4) — participație ≥10% deținută ≥1 an",
+    "exemptArt434Hint": "Doar pentru persoane juridice rezidente. Bifând, atestați că beneficiarul deține minimum 10% din capital de minimum 1 an la data plății (Cod fiscal art. 43 alin. (4)) — impozit 0, fără obligație D100 cod 150.",
     "interim2025": "Situații financiare interimare 2025 (cota tranzitorie 10%)",
     "interim2025Hint": "Bifați doar pentru dividende distribuite pe baza situațiilor interimare întocmite în 2025 — cota rămâne 10% chiar dacă plata e în 2026 (Legea 141/2025 art. VII).",
     "add": "Adaugă dividend",

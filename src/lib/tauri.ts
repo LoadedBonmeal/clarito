@@ -1311,6 +1311,9 @@ export interface Dividend {
   beneficiaryCountry: string | null;
   /** D207 (nerezidenți): codul fiscal din străinătate (cifS / NIF). */
   beneficiaryForeignTaxId: string | null;
+  /** Scutit art. 43 alin. (4) C.fisc. — PJ rezidentă cu participație ≥10% deținută ≥1 an (atestată
+   *  de utilizator): cotă 0, impozit 0, fără rând 446 în GL, exclus din obligația D100 cod 150. */
+  exemptArt434: boolean;
   note: string | null;
   taxDeadline: string;
 }
@@ -1324,6 +1327,8 @@ export interface DividendInput {
   beneficiaryCnp?: string | null;
   beneficiaryResident?: boolean;
   beneficiaryType?: "PF" | "PJ";
+  /** Scutit art. 43 alin. (4) — acceptat DOAR pentru beneficiar PJ rezident (altfel Validation). */
+  exemptArt434?: boolean;
   note?: string | null;
 }
 /** DIV-01: editare in-place a identității beneficiarului (CNP/nume/rezidență/tip) + dată plată/notă.

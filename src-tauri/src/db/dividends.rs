@@ -99,6 +99,12 @@ pub struct Dividend {
     pub beneficiary_country: Option<String>,
     /// `cifS` D207 — codul fiscal din străinătate (NIF) al beneficiarului nerezident (opțional).
     pub beneficiary_foreign_tax_id: Option<String>,
+    /// Scutire art. 43 alin. (4) Cod fiscal: dividendele plătite unei persoane juridice ROMÂNE care
+    /// deține ≥10% din capital de ≥1 an sunt SCUTITE de impozit. Utilizatorul ATESTĂ condiția de
+    /// participație; valabil doar pentru beneficiar rezident de tip PJ. Când e setat: cotă 0,
+    /// impozit 0, nota GL fără rândul 446 (457 creditat cu brutul întreg) și distribuirea NU intră
+    /// în obligația D100 cod 150.
+    pub exempt_art43_4: bool,
     pub note: Option<String>,
     /// Termenul de plată al impozitului (derivat, nu stocat).
     pub tax_deadline: String,
@@ -135,6 +141,11 @@ pub struct DividendInput {
     pub beneficiary_country: Option<String>,
     #[serde(default)]
     pub beneficiary_foreign_tax_id: Option<String>,
+    /// Scutire art. 43 alin. (4) — vezi [`Dividend::exempt_art43_4`]. Acceptată DOAR pentru
+    /// beneficiar rezident de tip PJ (altfel Validation error). Afectează sumele + GL, deci nu e
+    /// editabilă in-place (ca brutul/impozitul): delete + recreate.
+    #[serde(default)]
+    pub exempt_art43_4: bool,
     pub note: Option<String>,
 }
 
@@ -182,6 +193,7 @@ fn row_to_dividend(r: &sqlx::sqlite::SqliteRow) -> Dividend {
         beneficiary_type: r.get("beneficiary_type"),
         beneficiary_country: r.get("beneficiary_country"),
         beneficiary_foreign_tax_id: r.get("beneficiary_foreign_tax_id"),
+        exempt_art43_4: r.get::<i64, _>("exempt_art43_4") != 0,
         note: r.get("note"),
         tax_deadline,
     }
@@ -190,7 +202,8 @@ fn row_to_dividend(r: &sqlx::sqlite::SqliteRow) -> Dividend {
 const SELECT: &str =
     "SELECT id, company_id, distribution_date, payment_date, gross_amount, tax_rate, \
      tax_amount, net_amount, interim_2025, shareholder, beneficiary_cnp, beneficiary_resident, \
-     beneficiary_type, beneficiary_country, beneficiary_foreign_tax_id, note FROM dividends";
+     beneficiary_type, beneficiary_country, beneficiary_foreign_tax_id, exempt_art43_4, note \
+     FROM dividends";
 
 pub async fn list(pool: &SqlitePool, company_id: &str) -> AppResult<Vec<Dividend>> {
     let rows = sqlx::query(&format!(
@@ -242,17 +255,30 @@ pub async fn create(pool: &SqlitePool, input: DividendInput) -> AppResult<Divide
             ));
         }
     }
-    let rate = dividend_tax_rate(date, input.interim_2025);
-    let tax = round2(gross * Decimal::new(rate, 2));
-    let net = gross - tax; // ambele 2dp → diferența e exactă, deci nota e echilibrată
-
     // Tip beneficiar: "PJ" doar dacă e cerut explicit; orice altceva → "PF" (implicit, cazul uzual).
     let ben_type = if input.beneficiary_type.as_deref() == Some(BEN_PJ) {
         BEN_PJ
     } else {
         BEN_PF
     };
-    // D207 (nerezidenți): țara (Stat_R) + codul fiscal străin (cifS), opționale la creare.
+    // W8-1: scutirea art. 43 alin. (4) se aplică DOAR dividendelor către o persoană juridică
+    // ROMÂNĂ (rezidentă) cu participație ≥10% deținută ≥1 an (condiție atestată de utilizator).
+    // PF-urile (art. 97) și nerezidenții (art. 224 / D207) nu au această scutire pe acest drum.
+    if input.exempt_art43_4 && (ben_type != BEN_PJ || !input.beneficiary_resident) {
+        return Err(AppError::Validation(
+            "Scutirea art. 43 alin. (4) se aplică doar dividendelor către o persoană juridică \
+             rezidentă (participație ≥10% deținută ≥1 an)."
+                .into(),
+        ));
+    }
+    let rate = if input.exempt_art43_4 {
+        0 // scutit art. 43(4): cotă 0, impozit 0
+    } else {
+        dividend_tax_rate(date, input.interim_2025)
+    };
+    let tax = round2(gross * Decimal::new(rate, 2));
+    let net = gross - tax; // ambele 2dp → diferența e exactă, deci nota e echilibrată
+                           // D207 (nerezidenți): țara (Stat_R) + codul fiscal străin (cifS), opționale la creare.
     let ben_country = input
         .beneficiary_country
         .as_deref()
@@ -268,8 +294,8 @@ pub async fn create(pool: &SqlitePool, input: DividendInput) -> AppResult<Divide
         "INSERT INTO dividends (id, company_id, distribution_date, payment_date, gross_amount, \
          tax_rate, tax_amount, net_amount, interim_2025, shareholder, beneficiary_cnp, \
          beneficiary_resident, beneficiary_type, beneficiary_country, beneficiary_foreign_tax_id, \
-         note, created_at) \
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)",
+         exempt_art43_4, note, created_at) \
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18)",
     )
     .bind(&id)
     .bind(&input.company_id)
@@ -292,6 +318,7 @@ pub async fn create(pool: &SqlitePool, input: DividendInput) -> AppResult<Divide
     .bind(ben_type)
     .bind(ben_country)
     .bind(ben_foreign)
+    .bind(input.exempt_art43_4 as i64)
     .bind(input.note.as_deref())
     .bind(now_unix())
     .execute(pool)
@@ -299,7 +326,24 @@ pub async fn create(pool: &SqlitePool, input: DividendInput) -> AppResult<Divide
 
     // Nota contabilă: D 117 (rezultat reportat) brut; C 457 (dividende de plată) net; C 446 (impozit
     // pe dividende) impozit. Σdebit (brut) = Σcredit (net + impozit). Idempotent per dividend id.
-    let desc = format!("Repartizare dividende {date} (impozit {rate}%)");
+    // W8-1: la scutirea art. 43(4) NU există impozit reținut → nota are DOAR 117 / 457 (457 creditat
+    // cu întregul brut, net = brut); rândul 446 e absent, nu un rând cu 0.
+    let desc = if input.exempt_art43_4 {
+        format!("Repartizare dividende {date} (scutit art. 43 alin. (4) C.fisc.)")
+    } else {
+        format!("Repartizare dividende {date} (impozit {rate}%)")
+    };
+    let lines_exempt = [("117", gross, Decimal::ZERO), ("457", Decimal::ZERO, net)];
+    let lines_taxed = [
+        ("117", gross, Decimal::ZERO),
+        ("457", Decimal::ZERO, net),
+        ("446", Decimal::ZERO, tax),
+    ];
+    let lines: &[(&str, Decimal, Decimal)] = if input.exempt_art43_4 {
+        &lines_exempt
+    } else {
+        &lines_taxed
+    };
     crate::db::gl::post_manual_journal(
         pool,
         &crate::db::gl::ManualJournal {
@@ -312,11 +356,7 @@ pub async fn create(pool: &SqlitePool, input: DividendInput) -> AppResult<Divide
             description: &desc,
             partner_cui: None,
         },
-        &[
-            ("117", gross, Decimal::ZERO),
-            ("457", Decimal::ZERO, net),
-            ("446", Decimal::ZERO, tax),
-        ],
+        lines,
     )
     .await?;
 
@@ -416,7 +456,9 @@ pub async fn dividend_tax_due_in_period(
 ) -> AppResult<Decimal> {
     let mut total = Decimal::ZERO;
     for d in list(pool, company_id).await? {
-        if d.tax_deadline.starts_with(period_ym) && d.beneficiary_resident {
+        // W8-1: scutirea art. 43(4) nu generează impozit (tax_amount e deja 0) — o excludem
+        // explicit ca filtrul să rămână corect chiar dacă suma ar fi vreodată nenulă.
+        if d.tax_deadline.starts_with(period_ym) && d.beneficiary_resident && !d.exempt_art43_4 {
             total += Decimal::from_str(d.tax_amount.trim()).unwrap_or(Decimal::ZERO);
         }
     }
@@ -433,6 +475,13 @@ pub const D100_DIVIDEND_PF_LABEL: &str =
 pub const D100_DIVIDEND_PJ_COD: &str = "150";
 pub const D100_DIVIDEND_PJ_LABEL: &str =
     "Impozit pe dividende distribuite persoanelor juridice (art. 43 C.fisc.)";
+/// W8-2 — Obligația D100 pentru impozitul pe dividende reținut NEREZIDENȚILOR (art. 224 Cod fiscal):
+/// cod_oblig 631 („Impozit pe veniturile din dividende obținute din România de persoane nerezidente").
+/// VERIFICAT în nomenclatorul îmbarcat al DUK D100Validator (Parameters: cod 631, aceeași tabelă din
+/// care provin 604/150). Rând pur INFORMATIV, ca și 604/150: impozitul se declară lunar pe D100
+/// cod 631, iar anual informativ prin D207.
+pub const D100_DIVIDEND_NONREZ_COD: &str = "631";
+pub const D100_DIVIDEND_NONREZ_LABEL: &str = "Impozit dividende nerezidenți (D207)";
 
 /// O linie informativă de obligație de impozit pe dividende pentru Declarația 100: codul de creanță
 /// (cod_oblig), denumirea oficială, suma reținută și scadența (25 a lunii). D100 NU emite XML (se depune
@@ -454,32 +503,61 @@ pub struct DividendObligation {
 
 /// Obligațiile de impozit pe dividende cu scadența în lunile date (rânduri informative pentru D100).
 /// `months` = liste de `YYYY-MM` (de regulă cele 3 luni ale trimestrului afișat). Grupează pe (lună de
-/// scadență, tip beneficiar): rânduri SEPARATE pentru PF (cod 604, art. 97) și PJ (cod 150, art. 43),
-/// fiindcă sunt creanțe distincte în Nomenclator și se declară pe poziții diferite. O linie per
-/// (lună, tip) cu impozit > 0. Datele ISO se compară lexicografic (cf. restul modulului).
+/// scadență, tip beneficiar): rânduri SEPARATE pentru PF (cod 604, art. 97), PJ (cod 150, art. 43) și
+/// — W8-2 — NEREZIDENȚI (cod 631, art. 224, raportare anuală prin D207), fiindcă sunt creanțe
+/// distincte în Nomenclator și se declară pe poziții diferite. O linie per (lună, tip) cu cel puțin o
+/// distribuire. Scutirile art. 43(4) (W8-1) nu produc rânduri. Datele ISO se compară lexicografic.
 pub async fn dividend_obligations_in_months(
     pool: &SqlitePool,
     company_id: &str,
     months: &[String],
 ) -> AppResult<Vec<DividendObligation>> {
+    /// Bucket-ul de agregare: PF/PJ rezidente (604/150) + nerezidenți (631, W8-2).
+    #[derive(PartialEq, Clone, Copy)]
+    enum Bucket {
+        ResidentPf,
+        ResidentPj,
+        NonResident,
+    }
     let all = list(pool, company_id).await?;
     let mut out = Vec::new();
     for ym in months {
         let (y, m) = ym.split_once('-').unwrap_or(("", ""));
-        // PJ înaintea PF e indiferent; emitem PF apoi PJ pentru o ordine stabilă.
-        for (is_pj, cod, label) in [
-            (false, D100_DIVIDEND_PF_COD, D100_DIVIDEND_PF_LABEL),
-            (true, D100_DIVIDEND_PJ_COD, D100_DIVIDEND_PJ_LABEL),
+        // Ordine stabilă: PF, PJ, apoi nerezidenți (W8-2 — rând informativ separat, cod 631 + D207).
+        for (bucket, cod, label) in [
+            (
+                Bucket::ResidentPf,
+                D100_DIVIDEND_PF_COD,
+                D100_DIVIDEND_PF_LABEL,
+            ),
+            (
+                Bucket::ResidentPj,
+                D100_DIVIDEND_PJ_COD,
+                D100_DIVIDEND_PJ_LABEL,
+            ),
+            (
+                Bucket::NonResident,
+                D100_DIVIDEND_NONREZ_COD,
+                D100_DIVIDEND_NONREZ_LABEL,
+            ),
         ] {
             let mut sum = Decimal::ZERO;
             let mut count = 0u32;
             for d in &all {
-                // Doar rezidenți: impozitul pe dividende către nerezidenți se declară pe altă
-                // obligație (impozit venituri nerezidenți, cod 631) + D207, nu pe 604/150.
-                if d.tax_deadline.starts_with(ym.as_str())
-                    && d.beneficiary_resident
-                    && (d.beneficiary_type == BEN_PJ) == is_pj
-                {
+                // 604/150 = doar rezidenți; impozitul reținut nerezidenților merge pe rândul lui
+                // (cod 631) + raportarea anuală D207 — nu pe 604/150.
+                // W8-1: distribuirile scutite art. 43(4) NU au impozit de declarat → nu produc
+                // (nici măcar cu suma 0) un rând de obligație cod 150.
+                let in_bucket = match bucket {
+                    Bucket::ResidentPf => {
+                        d.beneficiary_resident && !d.exempt_art43_4 && d.beneficiary_type != BEN_PJ
+                    }
+                    Bucket::ResidentPj => {
+                        d.beneficiary_resident && !d.exempt_art43_4 && d.beneficiary_type == BEN_PJ
+                    }
+                    Bucket::NonResident => !d.beneficiary_resident,
+                };
+                if d.tax_deadline.starts_with(ym.as_str()) && in_bucket {
                     sum += Decimal::from_str(d.tax_amount.trim()).unwrap_or(Decimal::ZERO);
                     count += 1;
                 }
@@ -797,6 +875,7 @@ mod tests {
                 beneficiary_type: None,
                 beneficiary_country: None,
                 beneficiary_foreign_tax_id: None,
+                exempt_art43_4: false,
                 note: None,
             },
         )
@@ -862,6 +941,7 @@ mod tests {
                 beneficiary_type: None,
                 beneficiary_country: None,
                 beneficiary_foreign_tax_id: None,
+                exempt_art43_4: false,
                 note: None,
             },
         )
@@ -982,6 +1062,7 @@ mod tests {
                     beneficiary_type: None,
                     beneficiary_country: None,
                     beneficiary_foreign_tax_id: None,
+                    exempt_art43_4: false,
                     note: None,
                 },
             )
@@ -1002,6 +1083,7 @@ mod tests {
                 beneficiary_type: None,
                 beneficiary_country: None,
                 beneficiary_foreign_tax_id: None,
+                exempt_art43_4: false,
                 note: None,
             },
         )
@@ -1062,13 +1144,15 @@ mod tests {
                     beneficiary_type: Some(ty.into()),
                     beneficiary_country: None,
                     beneficiary_foreign_tax_id: None,
+                    exempt_art43_4: false,
                     note: None,
                 },
             )
             .await
             .unwrap();
         }
-        // Nerezident (PF) plătit aceeași lună → NU intră în obligațiile 604/150 (merge pe cod 631/D207).
+        // Nerezident (PF) plătit aceeași lună → NU intră în 604/150; W8-2: primește propriul rând
+        // informativ (cod 631, D207).
         create(
             &pool,
             DividendInput {
@@ -1083,6 +1167,7 @@ mod tests {
                 beneficiary_type: Some(BEN_PF.into()),
                 beneficiary_country: None,
                 beneficiary_foreign_tax_id: None,
+                exempt_art43_4: false,
                 note: None,
             },
         )
@@ -1091,15 +1176,157 @@ mod tests {
         let obls = dividend_obligations_in_months(&pool, "co-1", &["2026-08".to_string()])
             .await
             .unwrap();
-        // Două creanțe distincte (PF înaintea PJ), fiecare 10000 × 16% = 1600. Nerezidentul e exclus
-        // (altfel PF ar fi 1600 + 1440 = 3040).
-        assert_eq!(obls.len(), 2, "PF (604) + PJ (150); nerezidentul exclus");
+        // Trei creanțe distincte (PF, PJ, apoi nerezident). PF/PJ câte 10000 × 16% = 1600 —
+        // nerezidentul NU e amestecat în 604 (altfel PF ar fi 1600 + 1440 = 3040); W8-2: el
+        // primește propriul rând informativ cod 631 (9000 × 16% = 1440).
+        assert_eq!(obls.len(), 3, "PF (604) + PJ (150) + nerezident (631)");
         assert_eq!(obls[0].cod_oblig, "604");
         assert!(obls[0].label.contains("persoanelor fizice"));
         assert_eq!(obls[0].amount, "1600.00");
         assert_eq!(obls[1].cod_oblig, "150");
         assert!(obls[1].label.contains("persoanelor juridice"));
         assert_eq!(obls[1].amount, "1600.00");
+        assert_eq!(obls[2].cod_oblig, "631");
+        assert!(obls[2].label.contains("nerezidenți"));
+        assert_eq!(obls[2].amount, "1440.00");
+        assert_eq!(obls[2].count, 1);
+    }
+
+    /// W8-1: scutirea art. 43 alin. (4) — dividend către PJ rezidentă cu participație atestată:
+    /// cotă 0, impozit 0, net = brut, nota GL DOAR 117/457 (fără rând 446, nu un 446 cu 0), iar
+    /// distribuirea NU produce rând de obligație cod 150. PJ-ul NE-scutit rămâne neschimbat.
+    #[tokio::test]
+    async fn exempt_art43_4_zero_tax_no_446_and_no_obligation_row() {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+        sqlx::query(
+            "INSERT INTO companies (id, cui, legal_name, address, city, county, country) \
+             VALUES ('co-1','12345678','Test SRL','Str 1','Bucuresti','B','RO')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let mk = |exempt: bool, gross: &str| DividendInput {
+            company_id: "co-1".into(),
+            distribution_date: "2026-07-01".into(),
+            payment_date: Some("2026-07-10".into()),
+            gross_amount: gross.into(),
+            interim_2025: false,
+            shareholder: Some("Holding SRL".into()),
+            beneficiary_cnp: None,
+            beneficiary_resident: true,
+            beneficiary_type: Some(BEN_PJ.into()),
+            beneficiary_country: None,
+            beneficiary_foreign_tax_id: None,
+            exempt_art43_4: exempt,
+            note: None,
+        };
+        // Scutit: cotă 0, impozit 0, net = brut.
+        let ex = create(&pool, mk(true, "10000")).await.unwrap();
+        assert_eq!(ex.tax_rate, 0);
+        assert_eq!(
+            Decimal::from_str(&ex.tax_amount).unwrap(),
+            Decimal::ZERO,
+            "impozit 0 la scutire (got {})",
+            ex.tax_amount
+        );
+        assert_eq!(
+            Decimal::from_str(&ex.net_amount).unwrap(),
+            Decimal::from(10000),
+            "net = brut la scutire (got {})",
+            ex.net_amount
+        );
+        assert!(ex.exempt_art43_4);
+
+        // Nota GL: DOAR 2 linii (117 debit brut / 457 credit brut) — rândul 446 e ABSENT.
+        let rows = sqlx::query(
+            "SELECT e.account_code AS a, CAST(e.debit AS REAL) AS d, CAST(e.credit AS REAL) AS c \
+             FROM gl_entry e JOIN gl_journal j ON e.journal_pk = j.id \
+             WHERE j.company_id='co-1' AND j.source_type='DIVIDEND' AND j.source_id=?1 \
+             ORDER BY e.account_code",
+        )
+        .bind(&ex.id)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(rows.len(), 2, "nota scutită are DOAR 117/457 (fără 446)");
+        let a0: String = rows[0].get("a");
+        let a1: String = rows[1].get("a");
+        assert_eq!((a0.as_str(), a1.as_str()), ("117", "457"));
+        let (d0, c1): (f64, f64) = (rows[0].get("d"), rows[1].get("c"));
+        assert!((d0 - 10000.0).abs() < 0.005, "117 debitat cu brutul");
+        assert!(
+            (c1 - 10000.0).abs() < 0.005,
+            "457 creditat cu ÎNTREGUL brut (fără reținere)"
+        );
+
+        // Fără rând de obligație cod 150 (și nici 604/631) — nu există impozit de declarat.
+        let obls = dividend_obligations_in_months(&pool, "co-1", &["2026-08".to_string()])
+            .await
+            .unwrap();
+        assert!(
+            obls.is_empty(),
+            "distribuirea scutită art. 43(4) nu produce obligații D100: {obls:?}"
+        );
+        // ... și nu intră nici în totalul impozitului scadent al perioadei.
+        assert_eq!(
+            dividend_tax_due_in_period(&pool, "co-1", "2026-08")
+                .await
+                .unwrap(),
+            Decimal::ZERO
+        );
+
+        // PJ NE-scutit, aceleași date: comportament neschimbat (16%, rând cod 150).
+        let tx = create(&pool, mk(false, "5000")).await.unwrap();
+        assert_eq!(tx.tax_rate, 16);
+        assert_eq!(tx.tax_amount, "800.00");
+        assert!(!tx.exempt_art43_4);
+        let obls = dividend_obligations_in_months(&pool, "co-1", &["2026-08".to_string()])
+            .await
+            .unwrap();
+        assert_eq!(obls.len(), 1, "doar PJ-ul ne-scutit produce obligație");
+        assert_eq!(obls[0].cod_oblig, "150");
+        assert_eq!(obls[0].amount, "800.00");
+        assert_eq!(obls[0].count, 1, "scutitul nu e numărat nici cu suma 0");
+    }
+
+    /// W8-1: scutirea art. 43(4) e refuzată pentru PF (art. 97) și pentru nerezidenți (art. 224).
+    #[tokio::test]
+    async fn exempt_art43_4_rejected_for_pf_and_nonresident() {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+        sqlx::query(
+            "INSERT INTO companies (id, cui, legal_name, address, city, county, country) \
+             VALUES ('co-1','12345678','Test SRL','Str 1','Bucuresti','B','RO')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let mk = |ty: &str, resident: bool| DividendInput {
+            company_id: "co-1".into(),
+            distribution_date: "2026-07-01".into(),
+            payment_date: None,
+            gross_amount: "1000".into(),
+            interim_2025: false,
+            shareholder: Some("X".into()),
+            beneficiary_cnp: None,
+            beneficiary_resident: resident,
+            beneficiary_type: Some(ty.into()),
+            beneficiary_country: None,
+            beneficiary_foreign_tax_id: None,
+            exempt_art43_4: true,
+            note: None,
+        };
+        for (ty, resident) in [(BEN_PF, true), (BEN_PJ, false), (BEN_PF, false)] {
+            match create(&pool, mk(ty, resident)).await.unwrap_err() {
+                AppError::Validation(m) => {
+                    assert!(m.contains("art. 43"), "got: {m}")
+                }
+                other => {
+                    panic!("expected Validation for ({ty}, resident={resident}), got {other:?}")
+                }
+            }
+        }
     }
 
     // ── D205 aggregation (pure) ──────────────────────────────────────────────
@@ -1127,6 +1354,7 @@ mod tests {
             beneficiary_type: BEN_PF.into(),
             beneficiary_country: None,
             beneficiary_foreign_tax_id: None,
+            exempt_art43_4: false,
             note: None,
             tax_deadline: "2026-01-25".into(),
         }
@@ -1156,6 +1384,7 @@ mod tests {
             beneficiary_type: BEN_PF.into(),
             beneficiary_country: country.map(|s| s.into()),
             beneficiary_foreign_tax_id: None,
+            exempt_art43_4: false,
             note: None,
             tax_deadline: "2026-05-25".into(),
         }
@@ -1381,6 +1610,7 @@ mod tests {
                 beneficiary_type: "PF".into(),
                 beneficiary_country: None,
                 beneficiary_foreign_tax_id: None,
+                exempt_art43_4: false,
                 note: None,
                 tax_deadline: deadline.into(),
             }

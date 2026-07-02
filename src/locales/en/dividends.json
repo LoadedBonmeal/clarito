@@ -19,6 +19,8 @@
     "beneficiaryCountryHint": "2-letter ISO code (e.g. GB, DE, FR) — the Stat_R field in D207. Required for non-residents.",
     "beneficiaryForeignTaxId": "Foreign TIN / tax id (D207)",
     "beneficiaryForeignTaxIdHint": "The tax identification number from the country of residence (the cifS field in D207). Optional.",
+    "exemptArt434": "Exempt under art. 43 para. (4) — ≥10% holding kept for ≥1 year",
+    "exemptArt434Hint": "Resident legal entities only. By ticking you attest the beneficiary has held at least 10% of the capital for at least 1 year at the payment date (Fiscal Code art. 43 para. (4)) — tax 0, no D100 code 150 obligation.",
     "interim2025": "2025 interim financial statements (transitional 10% rate)",
     "interim2025Hint": "Tick only for dividends distributed on 2025 interim statements — the rate stays 10% even if paid in 2026 (Law 141/2025 art. VII).",
     "add": "Add dividend",

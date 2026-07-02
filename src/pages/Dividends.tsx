@@ -32,6 +32,9 @@ export function Dividends() {
   const [beneficiaryCnp, setBeneficiaryCnp] = useState("");
   const [beneficiaryResident, setBeneficiaryResident] = useState(true);
   const [beneficiaryType, setBeneficiaryType] = useState<"PF" | "PJ">("PF");
+  // W8-1: scutirea art. 43 alin. (4) — doar PJ rezidentă cu participație ≥10% deținută ≥1 an
+  // (condiție atestată de utilizator). Trimisă doar când beneficiarul e PJ rezident.
+  const [exemptArt434, setExemptArt434] = useState(false);
   const [d205Year, setD205Year] = useState(new Date().getFullYear() - 1);
   const [exportingD205, setExportingD205] = useState(false);
   const [dukBlock, setDukBlock] = useState<PreflightIssue[] | null>(null);
@@ -73,6 +76,8 @@ export function Dividends() {
         beneficiaryCnp: beneficiaryCnp.trim() || null,
         beneficiaryResident,
         beneficiaryType,
+        // Scutirea art. 43(4) e valabilă doar pentru PJ rezidentă — altfel nu o trimitem.
+        exemptArt434: beneficiaryType === "PJ" && beneficiaryResident ? exemptArt434 : false,
       });
     },
     onSuccess: () => {
@@ -80,6 +85,7 @@ export function Dividends() {
       setGrossAmount("");
       setShareholder("");
       setBeneficiaryCnp("");
+      setExemptArt434(false);
       notify.success(t("dividends.saved"));
     },
     onError: (e) => notify.error(formatError(e, t("dividends.saveFailed"))),
@@ -299,6 +305,19 @@ export function Dividends() {
               <option value="PJ">{t("dividends.beneficiaryTypePJ")}</option>
             </select>
           </div>
+          {beneficiaryType === "PJ" && beneficiaryResident && (
+            <div className="field">
+              <label className="chk-row">
+                <input
+                  type="checkbox"
+                  checked={exemptArt434}
+                  onChange={(e) => setExemptArt434(e.target.checked)}
+                />
+                <span>{t("dividends.exemptArt434")}</span>
+              </label>
+              <div className="hint">{t("dividends.exemptArt434Hint")}</div>
+            </div>
+          )}
           <div className="field">
             <label>{t("dividends.beneficiaryCnp")}</label>
             <input

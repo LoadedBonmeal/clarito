@@ -225,7 +225,12 @@ pub fn required_perm(cmd: &str) -> Option<Perm> {
         // export_all_my_data dumps the ENTIRE data.db (all companies + every
         // user's Argon2 password_hash) to a ZIP — must NOT be freed by the
         // `export_` read-prefix; gate it identically to export_backup (Delete).
+        // import_backup RESTORES a full backup over data.db — including the
+        // users table — so a lower role restoring a crafted backup is a
+        // privilege escalation. Gate it like export_backup (Delete), NOT the
+        // CreateDraft fallback it previously fell through to.
         "export_all_my_data"
+        | "import_backup"
         | "delete_company"
         | "delete_contact"
         | "delete_product"
@@ -263,7 +268,11 @@ pub fn required_perm(cmd: &str) -> Option<Perm> {
         | "delete_expense_report"
         // Wave F: sporuri + rețineri
         | "delete_spor"
-        | "delete_retinere" => Some(Perm::Delete),
+        | "delete_retinere"
+        // Engine-completeness deletes (previously fell through to CreateDraft)
+        | "delete_accrual"
+        | "delete_provision"
+        | "delete_capital_good" => Some(Perm::Delete),
 
         // ── ViewReports ───────────────────────────────────────────────────
         "generate_vat_report"
@@ -967,6 +976,76 @@ mod tests {
             Decision::Allow,
             "Admin must be allowed to call export_all_my_data"
         );
+    }
+
+    // ── W7-1: import_backup must require Delete (privilege-escalation fix) ──
+
+    /// import_backup restores a full backup over data.db (incl. the users
+    /// table) → restoring a crafted backup is a privilege escalation. It must
+    /// require Delete, not the CreateDraft fallback it used to get.
+    #[test]
+    fn import_backup_requires_delete() {
+        assert_eq!(
+            required_perm("import_backup"),
+            Some(Perm::Delete),
+            "import_backup must require Delete (full-DB restore incl. users table)"
+        );
+        assert_eq!(
+            authorize("import_backup", true, Some(Role::Viewer)),
+            Decision::Forbidden,
+            "Viewer must be Forbidden on import_backup"
+        );
+        assert_eq!(
+            authorize("import_backup", true, Some(Role::Operator)),
+            Decision::Forbidden,
+            "Operator must be Forbidden on import_backup (no Delete perm)"
+        );
+        assert_eq!(
+            authorize("import_backup", true, Some(Role::Contabil)),
+            Decision::Allow,
+            "Contabil must be allowed to call import_backup"
+        );
+        assert_eq!(
+            authorize("import_backup", true, Some(Role::Admin)),
+            Decision::Allow,
+            "Admin must be allowed to call import_backup"
+        );
+    }
+
+    // ── W7-2: engine-completeness deletes must require Delete ──
+
+    /// delete_accrual / delete_provision / delete_capital_good previously fell
+    /// through to the CreateDraft fallback, letting Operator delete posted
+    /// accounting objects. They must require Delete like every other delete_*.
+    #[test]
+    fn engine_completeness_deletes_require_delete() {
+        for cmd in ["delete_accrual", "delete_provision", "delete_capital_good"] {
+            assert_eq!(
+                required_perm(cmd),
+                Some(Perm::Delete),
+                "'{cmd}' must require Delete (not the CreateDraft fallback)"
+            );
+            assert_eq!(
+                authorize(cmd, true, Some(Role::Viewer)),
+                Decision::Forbidden,
+                "Viewer must be Forbidden on '{cmd}'"
+            );
+            assert_eq!(
+                authorize(cmd, true, Some(Role::Operator)),
+                Decision::Forbidden,
+                "Operator must be Forbidden on '{cmd}' (no Delete perm)"
+            );
+            assert_eq!(
+                authorize(cmd, true, Some(Role::Contabil)),
+                Decision::Allow,
+                "Contabil must be allowed on '{cmd}'"
+            );
+            assert_eq!(
+                authorize(cmd, true, Some(Role::Admin)),
+                Decision::Allow,
+                "Admin must be allowed on '{cmd}'"
+            );
+        }
     }
 
     /// Wave 4 audit: EVERY official declaration exporter must map to SubmitAnaf — the

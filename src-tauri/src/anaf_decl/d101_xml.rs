@@ -8,6 +8,16 @@
 //! - `Data_S` / `Data_I` — capital D și I/S, formatul DD.MM.YYYY
 //! - `d_rec=2, d_recN=1` — DUK v8 impune acestea pentru declarația anuală (R2a)
 //! - `d_recN` — interval fix [1,1]; împreună cu `d_rec=2` satisface R2a
+//!
+//! ## W8-3 — semantica `d_rec` în dicționarul v10 (an ≥ 2024), VERIFICATĂ cu DUK-ul real
+//! (`tests/d101_drec_probe.rs`, D101Validator.jar, 2026-07):
+//!   - `d_recN` are interval FIX [1,1] (0 și 2 sunt respinse: „nu se incadreaza in intervalul cerut");
+//!   - regula R2a: „d_rec(x) =2 daca d_recN (1) =1" → d_rec=0 și d_rec=1 sunt RESPINSE,
+//!     d_rec=3 e în afara intervalului; SINGURA combinație validă e `d_rec=2, d_recN=1`.
+//! Deci pentru an ≥ 2024 atributul XML `d_rec` este o CONSTANTĂ STRUCTURALĂ a dicționarului și
+//! NU mai codifică statutul de rectificativă. Rectificativa NU se poate semnala prin acest câmp;
+//! evidența „originală vs. rectificativă" trebuie purtată separat (vezi
+//! `commands::d101::D101ExportParams::is_rectificative`).
 //! - `d_prof=0` — 0..2, obligatoriu
 //! - `d_reg=0`  — 0..1, obligatoriu
 //! - `temei=1`  — 1..2, obligatoriu
@@ -39,8 +49,12 @@ pub struct D101Header {
     pub an: i32,
     /// Anul de început al exercițiului fiscal.
     pub an_i: i32,
-    /// Tip declarație: 0=normală, 1=inițială, 2=rectificativă.
-    /// DUK v8: `d_rec=2` împreună cu `d_recN=1` este impus pentru declarația anuală.
+    /// Atributul XML `d_rec`. ATENȚIE (W8-3, verificat cu DUK-ul real — vezi doc-ul modulului):
+    /// - an ≥ 2024 (dicționar v10): câmpul e o CONSTANTĂ STRUCTURALĂ — emitem mereu `2`
+    ///   (singura valoare acceptată, R2a + d_recN fix 1), indiferent de valoarea de aici.
+    ///   NU codifică „rectificativă"; folosiți `D101ExportParams::is_rectificative` pentru evidență.
+    /// - an ≤ 2023 (v9): emis ca atare, cu semantica istorică (0=normală, 1=inițială,
+    ///   2=rectificativă).
     pub d_rec: u8,
     /// 0 = nu se anulează.
     pub d_anulare: u8,
@@ -136,10 +150,13 @@ pub fn build_d101_xml(h: &D101Header) -> AppResult<String> {
 
     let ns = d101_namespace_for_year(h.an);
 
-    // DUK v8 requires d_recN=1 (fixed range [1,1]) together with d_rec=2 (R2a rule).
-    // These are structural requirements for D101 annual profit tax (≥2024).
+    // DUK v10 (an ≥ 2024) requires d_recN=1 (fixed range [1,1]) together with d_rec=2 (R2a).
+    // W8-3: verified against the REAL DUK (tests/d101_drec_probe.rs) — d_rec ∈ {0,1,3} and
+    // d_recN ∈ {0,2} are all rejected; (2,1) is the ONLY valid pair. The attribute is therefore
+    // a structural constant for ≥2024 and carries NO original-vs-rectificative meaning; the
+    // caller's d_rec is honored verbatim only for ≤2023 (v9 semantics).
     let d_rec_val = if h.an >= 2024 { 2 } else { h.d_rec };
-    let d_rec_n = 1u8; // always 1 for v8
+    let d_rec_n = 1u8; // fixed [1,1]
 
     // d_grup=1 required for an>=2022 (fixed value [1,1]).
     let d_grup = if h.an >= 2022 { "1" } else { "" };
@@ -341,5 +358,34 @@ mod tests {
     fn build_d101_emits_total_plata() {
         let xml = build_d101_xml(&header()).expect("build_d101_xml");
         assert!(xml.contains(r#"totalPlata_A="0""#));
+    }
+
+    /// W8-3 (DUK-verificat, vezi tests/d101_drec_probe.rs): pentru an ≥ 2024 dicționarul v10
+    /// acceptă DOAR d_rec=2 (+ d_recN=1) — atributul e o constantă structurală, emisă indiferent
+    /// de d_rec-ul apelantului. Pentru an ≤ 2023 (v9) d_rec-ul apelantului e emis ca atare.
+    #[test]
+    fn d_rec_structural_constant_for_2024_plus_verbatim_before() {
+        for caller_d_rec in [0u8, 1, 2] {
+            let mut h = header();
+            h.d_rec = caller_d_rec;
+            let xml = build_d101_xml(&h).expect("build_d101_xml");
+            assert!(
+                xml.contains(r#"d_rec="2""#) && xml.contains(r#"d_recN="1""#),
+                "an=2025 (v10): singura pereche validă e d_rec=2/d_recN=1, \
+                 indiferent de d_rec-ul apelantului ({caller_d_rec}); got:\n{xml}"
+            );
+        }
+        // an ≤ 2023 (v9): valoarea apelantului e onorată.
+        let mut h = header();
+        h.an = 2023;
+        h.an_i = 2023;
+        h.data_i = "01.01.2023".into();
+        h.data_s = "31.12.2023".into();
+        h.d_rec = 1;
+        let xml = build_d101_xml(&h).expect("build_d101_xml");
+        assert!(
+            xml.contains(r#"d_rec="1""#),
+            "an=2023 (v9): d_rec-ul apelantului trebuie emis ca atare; got:\n{xml}"
+        );
     }
 }

@@ -1029,6 +1029,12 @@ function OrderDetail({
   const gname = (id: string) => gestiuni.find((g) => g.id === id)?.denumire ?? id;
   const bname = (id: string) => boms.find((b) => b.id === id)?.name ?? id;
 
+  // HTML-escape helper for the printable documents (same pattern as
+  // buildOrdinPlataHtml in ReceivedDetail.tsx): stored strings (product /
+  // gestiune names, UM, dates) must never reach document.write unescaped.
+  const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const te = (k: string) => esc(t(k));
+
   const scale =
     bomDetail && parseFloat(bomDetail.outputQty) > 0
       ? parseFloat(order.qtyProduced) / parseFloat(bomDetail.outputQty)
@@ -1045,9 +1051,9 @@ function OrderDetail({
         const qty = (parseFloat(l.qty) * scale).toFixed(6);
         return `<tr>
           <td>${i + 1}</td>
-          <td>${pname(l.componentProductId)}</td>
+          <td>${esc(pname(l.componentProductId))}</td>
           <td></td>
-          <td>${l.um ?? ""}</td>
+          <td>${esc(l.um ?? "")}</td>
           <td style="text-align:right">${parseFloat(qty).toLocaleString("ro-RO", { minimumFractionDigits: 2 })}</td>
           <td style="text-align:right">—</td>
           <td style="text-align:right">—</td>
@@ -1065,27 +1071,27 @@ th{background:#eee;text-align:center}
 .footer{margin-top:24px;display:flex;gap:40px}
 .footer div{flex:1;border-top:1px solid #000;padding-top:4px;text-align:center}
 </style></head><body>
-<h2>${t("productie.print.bonConsum")}</h2>
-<p>${t("productie.print.date")}: <strong>${order.productionDate}</strong> &nbsp;|&nbsp;
-   ${t("productie.print.gestiune")}: <strong>${gname(order.gestiuneId)}</strong> &nbsp;|&nbsp;
-   ${t("productie.print.orderRef")}: <strong>${order.id.slice(-8).toUpperCase()}</strong></p>
+<h2>${te("productie.print.bonConsum")}</h2>
+<p>${te("productie.print.date")}: <strong>${esc(order.productionDate)}</strong> &nbsp;|&nbsp;
+   ${te("productie.print.gestiune")}: <strong>${esc(gname(order.gestiuneId))}</strong> &nbsp;|&nbsp;
+   ${te("productie.print.orderRef")}: <strong>${esc(order.id.slice(-8).toUpperCase())}</strong></p>
 <table>
 <thead><tr>
-<th>${t("productie.print.colNo")}</th>
-<th>${t("productie.print.colDenumire")}</th>
-<th>${t("productie.print.colCod")}</th>
-<th>${t("productie.print.colUm")}</th>
-<th>${t("productie.print.colQty")}</th>
-<th>${t("productie.print.colUnitCost")}</th>
-<th>${t("productie.print.colValue")}</th>
+<th>${te("productie.print.colNo")}</th>
+<th>${te("productie.print.colDenumire")}</th>
+<th>${te("productie.print.colCod")}</th>
+<th>${te("productie.print.colUm")}</th>
+<th>${te("productie.print.colQty")}</th>
+<th>${te("productie.print.colUnitCost")}</th>
+<th>${te("productie.print.colValue")}</th>
 </tr></thead>
 <tbody>${linesHtml}</tbody>
-<tfoot><tr><td colspan="6" style="text-align:right"><strong>${t("productie.print.totalValue")}</strong></td>
+<tfoot><tr><td colspan="6" style="text-align:right"><strong>${te("productie.print.totalValue")}</strong></td>
 <td style="text-align:right"><strong>${parseFloat(totalVal).toLocaleString("ro-RO",{minimumFractionDigits:2})}</strong></td></tr></tfoot>
 </table>
 <div class="footer">
-<div>${t("productie.print.semnEliberat")}<br>${t("productie.print.semnatura")}</div>
-<div>${t("productie.print.semnPrimitor")}<br>${t("productie.print.semnatura")}</div>
+<div>${te("productie.print.semnEliberat")}<br>${te("productie.print.semnatura")}</div>
+<div>${te("productie.print.semnPrimitor")}<br>${te("productie.print.semnatura")}</div>
 </div>
 </body></html>`);
     win.document.close();
@@ -1107,24 +1113,24 @@ th{background:#eee;text-align:center}
 .footer{margin-top:24px;display:flex;gap:40px}
 .footer div{flex:1;border-top:1px solid #000;padding-top:4px;text-align:center}
 </style></head><body>
-<h2>${t("productie.print.bonPredare")}</h2>
-<p>${t("productie.print.date")}: <strong>${order.productionDate}</strong> &nbsp;|&nbsp;
-   ${t("productie.print.gestiune")}: <strong>${gname(order.gestiuneId)}</strong> &nbsp;|&nbsp;
-   ${t("productie.print.orderRef")}: <strong>${order.id.slice(-8).toUpperCase()}</strong></p>
+<h2>${te("productie.print.bonPredare")}</h2>
+<p>${te("productie.print.date")}: <strong>${esc(order.productionDate)}</strong> &nbsp;|&nbsp;
+   ${te("productie.print.gestiune")}: <strong>${esc(gname(order.gestiuneId))}</strong> &nbsp;|&nbsp;
+   ${te("productie.print.orderRef")}: <strong>${esc(order.id.slice(-8).toUpperCase())}</strong></p>
 <table>
 <thead><tr>
-<th>${t("productie.print.colNo")}</th>
-<th>${t("productie.print.colDenumire")}</th>
-<th>${t("productie.print.colCod")}</th>
-<th>${t("productie.print.colUm")}</th>
-<th>${t("productie.print.colQty")}</th>
-<th>${t("productie.print.colUnitCost")}</th>
-<th>${t("productie.print.colValue")}</th>
+<th>${te("productie.print.colNo")}</th>
+<th>${te("productie.print.colDenumire")}</th>
+<th>${te("productie.print.colCod")}</th>
+<th>${te("productie.print.colUm")}</th>
+<th>${te("productie.print.colQty")}</th>
+<th>${te("productie.print.colUnitCost")}</th>
+<th>${te("productie.print.colValue")}</th>
 </tr></thead>
 <tbody>
 <tr>
   <td>1</td>
-  <td>${pname(order.productId)}</td>
+  <td>${esc(pname(order.productId))}</td>
   <td></td>
   <td>buc</td>
   <td style="text-align:right">${parseFloat(order.qtyProduced).toLocaleString("ro-RO",{minimumFractionDigits:2})}</td>
@@ -1132,12 +1138,12 @@ th{background:#eee;text-align:center}
   <td style="text-align:right">${parseFloat(order.totalMaterialCost).toLocaleString("ro-RO",{minimumFractionDigits:2})}</td>
 </tr>
 </tbody>
-<tfoot><tr><td colspan="6" style="text-align:right"><strong>${t("productie.print.totalValue")}</strong></td>
+<tfoot><tr><td colspan="6" style="text-align:right"><strong>${te("productie.print.totalValue")}</strong></td>
 <td style="text-align:right"><strong>${parseFloat(order.totalMaterialCost).toLocaleString("ro-RO",{minimumFractionDigits:2})}</strong></td></tr></tfoot>
 </table>
 <div class="footer">
-<div>${t("productie.print.semnEliberat")}<br>${t("productie.print.semnatura")}</div>
-<div>${t("productie.print.semnPrimitor")}<br>${t("productie.print.semnatura")}</div>
+<div>${te("productie.print.semnEliberat")}<br>${te("productie.print.semnatura")}</div>
+<div>${te("productie.print.semnPrimitor")}<br>${te("productie.print.semnatura")}</div>
 </div>
 </body></html>`);
     win.document.close();
