@@ -294,6 +294,26 @@ pub async fn update(
 /// Șterge un instrument de plată (și GL-ul asociat, cascadat prin source_id).
 pub async fn delete(pool: &SqlitePool, id: &str, company_id: &str) -> AppResult<()> {
     let pi = fetch_one(pool, id, company_id).await?;
+    // Period-lock guard (OMFP 2634/2015; QA follow-up to the v0.7.4 audit): the lifecycle
+    // events posted up to 8 GL journals — refuse when ANY of their months is FILED (locked).
+    let months: Vec<String> = sqlx::query_scalar(
+        "SELECT DISTINCT substr(transaction_date,1,7) FROM gl_journal \
+         WHERE company_id=?1 AND source_type='PAYMENT_INSTRUMENT' AND source_id LIKE ?2",
+    )
+    .bind(company_id)
+    // `_` is a LIKE wildcard, but ids are fixed-length UUIDs so `{id}_%` cannot match
+    // another instrument's `{uuid}_{suffix}` rows — no ESCAPE needed.
+    .bind(format!("{id}_%"))
+    .fetch_all(pool)
+    .await?;
+    for ym in &months {
+        if crate::db::period_locks::is_period_locked(pool, company_id, ym).await? {
+            return Err(crate::error::AppError::Validation(format!(
+                "Perioada {ym} este blocată (declarație depusă) — instrumentul de plată nu poate \
+                 fi șters. Deblocați perioada pentru a înregistra o corecție."
+            )));
+        }
+    }
     // Ștergem toate notele GL asociate (toate event-urile, inclusiv cele de scontare:
     // discount_remit = D5114=C413, deposit_reverse = stornarea depunerii anterioare).
     for suffix in &[

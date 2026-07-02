@@ -1815,6 +1815,254 @@ mod tests {
         assert!(tb.balanced, "mixed-roster payroll journal must balance");
     }
 
+    /// Shared fixture for the leave+excess golden tests: ONE employee (gross 5.500, full-time N,
+    /// June 2026) with BOTH a medical leave (cod 01, 8–12.06 = 5 working days, indemnity 600) AND
+    /// an OPEN diurnă excess of 200 — the exact combination FIX 1 of the Wave-E leave path guards.
+    /// Returns the pool (GL already posted by `run_payroll`) and the generated D112 XML.
+    async fn leave_plus_excess_fixture() -> (SqlitePool, String) {
+        let pool = setup().await;
+        // CNP valid (reused from the mixed-roster test's employee D).
+        let e = crate::db::payroll::create(&pool, emp_input("1900101410028", "Vasile Pop", "5500"))
+            .await
+            .unwrap();
+        crate::db::concedii::create(
+            &pool,
+            leave_input(&e.id, "CD", "9999999", "2026-06-08", "2026-06-12"),
+        )
+        .await
+        .unwrap();
+        let excess = rust_decimal::Decimal::from_str("200").unwrap();
+        crate::db::payroll_diurna::upsert_extra_income(
+            &pool,
+            "co1",
+            &e.id,
+            "2026-06",
+            "golden-leave-excess-dec",
+            excess,
+            "open",
+        )
+        .await
+        .unwrap();
+
+        crate::db::payroll::run_payroll(&pool, "co1", "2026-06-01", "2026-06-30")
+            .await
+            .unwrap();
+        let company = crate::db::companies::get(&pool, "co1").await.unwrap();
+        let xml = build_d112_xml(&pool, &company, 2026, 6, "6201", false)
+            .await
+            .unwrap();
+        (pool, xml)
+    }
+
+    /// GOLDEN (audit v0.7.4 QA follow-up) — medical leave + diurnă excess on the SAME employee.
+    ///
+    /// Locks in FIX 1 of the Wave-E leave-path special case in `build_d112_xml` (the
+    /// `eb.is_leave_path` branches around commands/payroll.rs:445-471): before the fix, Wave E
+    /// overwrote `de.impozit` with the worked+excess-only tax (`comb_sal_impozit`), silently
+    /// DROPPING the medical-leave indemnity income-tax slice — D112 602 under-declared by exactly
+    /// `indemn_tax` while GL 444 kept it. The mixed-roster architecture test above never exercises
+    /// this path (its excess is on employee C, its leave on employee D), so this fixture puts BOTH
+    /// on one employee. The roster has EXACTLY ONE employee, so the roster-level GL credits and
+    /// D112 obligations ARE the per-employee amounts (tightest granularity available — the GL
+    /// aggregates per roster, not per employee).
+    ///
+    /// Fixture arithmetic (June 2026 = 21 working days; leave 8–12.06 = 5 wd → 16 worked days;
+    /// gross 5.500, deducere 0, no sumă netaxabilă; indemnity cod 01 = 600 (CASS-due + taxable);
+    /// diurnă excess 200; every contribution/tax rounded half-away-from-zero to whole lei):
+    ///   worked_gross           = round(5500 × 16/21)         = 4190
+    ///   • leave-month totals (compute_payroll_with_leave):
+    ///     lr.cas               = round(25% × (4190+600))     = round(1197,50) = 1198
+    ///     lr.cass              = round(10% × 4790)           = 479
+    ///     lr.taxable_base      = 4790 − 1198 − 479           = 3113
+    ///     lr.income_tax        = round(10% × 3113)           = 311
+    ///   • worked-only slice (compute_payroll on 4190):
+    ///     w.cas = round(1047,50) = 1048;  w.cass = 419
+    ///     w.taxable_base       = 4190 − 1048 − 419           = 2723
+    ///     w.income_tax         = round(272,30)               = 272
+    ///   • indemnity slices (leave-minus-worked convention, db/payroll.rs B-path):
+    ///     indemn_tax           = 311 − 272                   = 39
+    ///     indemn_taxable_slice = 3113 − 2723                 = 390
+    ///   • combined worked+excess (diurnă folded, db/payroll.rs B-path excess branch):
+    ///     comb_cas             = round(25% × (4190+200))     = round(1097,50) = 1098
+    ///     comb_cass            = round(10% × 4390)           = 439
+    ///     comb_impozit_base    = 4390 − 1098 − 439 − 0       = 2853
+    ///     comb_sal_impozit     = round(10% × 2853)           = 285  ← worked+excess-ONLY tax
+    ///   • GL:  444 = t_tax + indemn.tax = 285 + 39           = 324
+    ///          4315 = 1098 + (1198−1048) = 1248;  4316 = 439 + (479−419) = 499
+    ///          436 = round(2,25% × (4190+200))               = 99
+    ///   • D112 (Wave E leave path): impozit = 285 + 39       = 324 = E3_15 = oblig 602
+    ///          E3_14 (baza impozit) = 2853 + 390             = 3243
+    ///          412 = round(25% × (4390+600)) = round(1247,50) = 1248;  432 = 499;  480 = 99
+    #[tokio::test]
+    async fn golden_leave_plus_diurna_excess_keeps_indemnity_tax_in_d112() {
+        use rust_decimal::prelude::ToPrimitive;
+        let (pool, xml) = leave_plus_excess_fixture().await;
+
+        let tb = crate::db::gl::trial_balance(&pool, "co1", "2026-06-01", "2026-06-30")
+            .await
+            .unwrap();
+        let gl_credit = |code: &str| -> i64 {
+            tb.rows
+                .iter()
+                .find(|r| r.account_code == code)
+                .map(|r| {
+                    rust_decimal::Decimal::from_str(&r.closing_credit)
+                        .unwrap_or(rust_decimal::Decimal::ZERO)
+                        .round_dp_with_strategy(
+                            0,
+                            rust_decimal::RoundingStrategy::MidpointAwayFromZero,
+                        )
+                        .to_i64()
+                        .unwrap_or(0)
+                })
+                .unwrap_or(0)
+        };
+        let oblig = |cod: &str| -> i64 {
+            let key = format!("A_codOblig=\"{cod}\"");
+            let i = xml
+                .find(&key)
+                .unwrap_or_else(|| panic!("obligația {cod} lipsește din XML"));
+            let dk = "A_datorat=\"";
+            let j = i + xml[i..].find(dk).expect("A_datorat") + dk.len();
+            let end = xml[j..].find('"').unwrap();
+            xml[j..j + end].parse::<i64>().unwrap()
+        };
+        // Per-employee E3 attribute (single-employee roster → exactly one asiguratE3 block).
+        let e3_attr = |name: &str| -> i64 {
+            let key = format!("{name}=\"");
+            let i = xml
+                .find(&key)
+                .unwrap_or_else(|| panic!("{name} lipsește din XML"));
+            let j = i + key.len();
+            let end = xml[j..].find('"').unwrap();
+            xml[j..j + end].parse::<i64>().unwrap()
+        };
+
+        // (1) GL ≡ D112 for the employee (roster == employee: single-employee roster).
+        assert_eq!(
+            gl_credit("444"),
+            oblig("602"),
+            "GOLDEN: impozit GL 444 ≠ D112 602 — leave+excess employee (Wave E leave path must \
+             re-add indemn_tax, not overwrite with the worked+excess-only tax)"
+        );
+        assert_eq!(
+            gl_credit("4315"),
+            oblig("412"),
+            "GOLDEN: CAS GL 4315 ≠ D112 412 — leave+excess employee"
+        );
+        assert_eq!(
+            gl_credit("4316"),
+            oblig("432"),
+            "GOLDEN: CASS GL 4316 ≠ D112 432 — leave+excess employee"
+        );
+        assert_eq!(
+            gl_credit("436"),
+            oblig("480"),
+            "GOLDEN: CAM GL 436 ≠ D112 480 — leave+excess employee"
+        );
+
+        // (2) The impozit CONTAINS the indemnity tax component. Both sides computed explicitly:
+        //     worked+excess-only tax = round(10% × (4390 − 1098 − 439)) = round(10% × 2853) = 285
+        //     indemnity tax slice    = lr.income_tax − w.income_tax = 311 − 272           = 39
+        //     declared impozit       = 285 + 39                                           = 324
+        let worked_excess_only_tax: i64 = 285; // what the PRE-FIX Wave E wrongly emitted
+        let indemn_tax: i64 = 39; // the slice the GL keeps on 444 via indemn.tax
+        let impozit = oblig("602");
+        assert!(
+            impozit > worked_excess_only_tax,
+            "GOLDEN: D112 602 = {impozit} must be STRICTLY greater than the worked+excess-only \
+             tax {worked_excess_only_tax} — otherwise the indemnity slice was dropped (pre-fix bug)"
+        );
+        assert_eq!(
+            impozit,
+            worked_excess_only_tax + indemn_tax,
+            "GOLDEN: D112 602 = comb_sal_impozit (285) + indemn_tax (39) = 324"
+        );
+        assert_eq!(gl_credit("444"), 324, "GOLDEN: GL 444 = 285 + 39 = 324");
+
+        // Golden values for the remaining pairs (arithmetic in the doc comment).
+        assert_eq!(oblig("412"), 1248, "GOLDEN: CAS 412 = round(25% × 4990)");
+        assert_eq!(oblig("432"), 499, "GOLDEN: CASS 432 = round(10% × 4990)");
+        assert_eq!(oblig("480"), 99, "GOLDEN: CAM 480 = round(2,25% × 4390)");
+        // The excess itself is declared in E3_23.
+        assert_eq!(e3_attr("E3_23"), 200, "GOLDEN: E3_23 = diurnă excess 200");
+
+        // (3) E3_14/E3_15 relation: E3_15 must stay within ±1 leu of round(10% × E3_14).
+        // NOTE (QA, audit v0.7.4): the two sides are built from TWO INDEPENDENT ROUNDINGS —
+        // E3_15 = round(10% × comb_impozit_base) + (round-derived indemn_tax), while E3_14 =
+        // round(comb_impozit_base + indemn_taxable_slice) is summed BEFORE rounding — so they can
+        // legitimately drift by ±1 leu on other fixtures (here the drift is 0: round(10% × 3243) =
+        // 324 = E3_15). Do NOT tighten this to exact equality.
+        let e3_14 = e3_attr("E3_14");
+        let e3_15 = e3_attr("E3_15");
+        assert_eq!(e3_14, 3243, "GOLDEN: E3_14 = 2853 + 390 = 3243");
+        assert_eq!(e3_15, 324, "GOLDEN: E3_15 = 285 + 39 = 324");
+        let ten_pct_of_base = (e3_14 + 5) / 10; // round(10% × E3_14), half-up on whole lei
+        assert!(
+            (e3_15 - ten_pct_of_base).abs() <= 1,
+            "GOLDEN: E3_15 ({e3_15}) must be within ±1 leu of round(10% × E3_14) = {ten_pct_of_base}"
+        );
+
+        assert!(tb.balanced, "leave+excess payroll journal must balance");
+    }
+
+    /// END-TO-END DUK gate for the leave+excess roster (opt-in, mirrors
+    /// `duk_validates_standard_d112` — same graceful-skip pattern): the SAME fixture as the golden
+    /// test above, run through the REAL bundled ANAF `D112Validator.jar` (`-v D112`) via `run_duk`.
+    /// `#[ignore]` because it spawns the 12 MB Java validator + the jlink JRE (slow); on demand:
+    ///   cargo test --lib commands::payroll::tests::duk_validates_leave_plus_excess_d112 -- --ignored --nocapture
+    #[tokio::test]
+    #[ignore]
+    async fn duk_validates_leave_plus_excess_d112() {
+        use crate::anaf_decl::duk::{run_duk, DukProvider, DukRuntime};
+        use crate::anaf_decl::DeclKind;
+        use std::path::PathBuf;
+
+        let (_pool, xml) = leave_plus_excess_fixture().await;
+        let tmp = std::env::temp_dir().join("d112_duk_leave_excess_test.xml");
+        std::fs::write(&tmp, &xml).unwrap();
+
+        let res = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources");
+        let java = res.join(if cfg!(windows) {
+            "jre-min/bin/java.exe"
+        } else {
+            "jre-min/bin/java"
+        });
+        let jar_dir = res.join("duk");
+
+        struct LocalBundle {
+            java: PathBuf,
+            jar_dir: PathBuf,
+        }
+        impl DukProvider for LocalBundle {
+            fn resolve(&self) -> Option<DukRuntime> {
+                if self.java.is_file() && self.jar_dir.join("DUKIntegrator.jar").is_file() {
+                    Some(DukRuntime {
+                        java: self.java.clone(),
+                        jar_dir: self.jar_dir.clone(),
+                    })
+                } else {
+                    None
+                }
+            }
+        }
+        let provider = LocalBundle { java, jar_dir };
+
+        match run_duk(&provider, DeclKind::D112, &tmp).unwrap() {
+            Some(outcome) => {
+                assert!(
+                    outcome.passed,
+                    "D112Validator reported errors on the leave+excess D112: {:?}",
+                    outcome.errors
+                );
+            }
+            None => {
+                eprintln!("SKIP: bundled DUK runtime not present — nothing validated");
+            }
+        }
+        let _ = std::fs::remove_file(&tmp);
+    }
+
     // ── Simulator salariu — unit tests ────────────────────────────────────────
 
     /// GOLDEN-1: simulate_salary(5000, 0 dependents) applies the correct art. 77 basic personal

@@ -824,7 +824,7 @@ pub(crate) fn county_to_nuts(raw: &str) -> String {
         }
         "bt" | "botosani" | "botoșani" | "botoşani" => Some("RO-BT"),
         "bv" | "brasov" | "brașov" | "braşov" => Some("RO-BV"),
-        "br" | "braila" | "brăila" | "brăilа" => Some("RO-BR"),
+        "br" | "braila" => Some("RO-BR"),
         // București — code is "B" (not "BU")
         "b"
         | "bucuresti"
@@ -844,7 +844,7 @@ pub(crate) fn county_to_nuts(raw: &str) -> String {
         "cj" | "cluj" => Some("RO-CJ"),
         "ct" | "constanta" | "constanța" | "constanţa" => Some("RO-CT"),
         "cv" | "covasna" => Some("RO-CV"),
-        "db" | "dambovita" | "dâmbovița" | "damboviţa" | "dambovița" => Some("RO-DB"),
+        "db" | "dambovita" | "dimbovita" => Some("RO-DB"),
         "dj" | "dolj" => Some("RO-DJ"),
         "gl" | "galati" | "galați" | "galaţi" => Some("RO-GL"),
         "gr" | "giurgiu" => Some("RO-GR"),
@@ -861,14 +861,14 @@ pub(crate) fn county_to_nuts(raw: &str) -> String {
         "ot" | "olt" => Some("RO-OT"),
         "ph" | "prahova" => Some("RO-PH"),
         "sm" | "satu mare" | "satu-mare" => Some("RO-SM"),
-        "sj" | "salaj" | "sălaj" | "sălаj" => Some("RO-SJ"),
+        "sj" | "salaj" => Some("RO-SJ"),
         "sb" | "sibiu" => Some("RO-SB"),
         "sv" | "suceava" => Some("RO-SV"),
         "tr" | "teleorman" => Some("RO-TR"),
         "tm" | "timis" | "timiș" | "timiş" => Some("RO-TM"),
         "tl" | "tulcea" => Some("RO-TL"),
         "vs" | "vaslui" => Some("RO-VS"),
-        "vl" | "valcea" | "vâlcea" | "vâlcеa" => Some("RO-VL"),
+        "vl" | "valcea" | "vilcea" => Some("RO-VL"),
         "vn" | "vrancea" => Some("RO-VN"),
         _ => None,
     };
@@ -1491,6 +1491,21 @@ mod tests {
     fn county_to_nuts_timis_to_ro_tm() {
         assert_eq!(county_to_nuts("Timiș"), "RO-TM");
         assert_eq!(county_to_nuts("Timis"), "RO-TM");
+    }
+
+    /// QA regression (v0.7.5): normalization maps â→i BEFORE matching, so the two
+    /// â-bearing county names need their normalized "i" forms in the map — the
+    /// correctly-spelled inputs used to fall through and the BR-RO-110 preflight
+    /// then hard-blocked valid invoices.
+    #[test]
+    fn county_to_nuts_a_circumflex_counties() {
+        assert_eq!(county_to_nuts("Dâmbovița"), "RO-DB");
+        assert_eq!(county_to_nuts("Dambovita"), "RO-DB");
+        assert_eq!(county_to_nuts("Vâlcea"), "RO-VL");
+        assert_eq!(county_to_nuts("Valcea"), "RO-VL");
+        // the other diacritic classes keep working
+        assert_eq!(county_to_nuts("Brăila"), "RO-BR");
+        assert_eq!(county_to_nuts("Sălaj"), "RO-SJ");
     }
 
     #[test]

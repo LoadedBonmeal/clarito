@@ -99,8 +99,15 @@ pub async fn create_in(
     // refuses locked periods) yet could not be deleted either → a stuck row silently diverging
     // from the filed declaration (incl. the cash-VAT deduction release). Covers
     // add_received_payment AND match_bank_txn (both go through create_in).
-    let period = input.paid_at.get(..7).unwrap_or("");
-    if !period.is_empty() && is_period_locked_in(&mut *conn, &input.company_id, period).await? {
+    // Fail-closed: a malformed paid_at (shorter than YYYY-MM-DD's YYYY-MM prefix) must be
+    // rejected here rather than silently skipping the lock check (QA follow-up).
+    let Some(period) = input.paid_at.get(..7) else {
+        return Err(AppError::Validation(format!(
+            "Data plății {} este invalidă (aștept formatul YYYY-MM-DD).",
+            input.paid_at
+        )));
+    };
+    if is_period_locked_in(&mut *conn, &input.company_id, period).await? {
         return Err(AppError::Validation(format!(
             "Perioada {period} este blocată (declarație depusă) — plata nu poate fi înregistrată. \
              Înregistrați plata într-o perioadă deschisă sau deblocați perioada și depuneți o \

@@ -561,6 +561,24 @@ pub async fn delete_advance(pool: &SqlitePool, id: &str, company_id: &str) -> Ap
             "Only draft 'granted' advances can be deleted".into(),
         ));
     }
+    // Period-lock guard (OMFP 2634/2015; QA follow-up to the v0.7.4 audit): a 'granted'
+    // advance HAS a posted AVANS_TREZORERIE journal (542) — refuse when its month is FILED.
+    let months: Vec<String> = sqlx::query_scalar(
+        "SELECT DISTINCT substr(transaction_date,1,7) FROM gl_journal \
+         WHERE company_id=?1 AND source_type='AVANS_TREZORERIE' AND source_id=?2",
+    )
+    .bind(company_id)
+    .bind(id)
+    .fetch_all(pool)
+    .await?;
+    for ym in &months {
+        if crate::db::period_locks::is_period_locked(pool, company_id, ym).await? {
+            return Err(AppError::Validation(format!(
+                "Perioada {ym} este blocată (declarație depusă) — avansul nu poate fi șters. \
+                 Deblocați perioada pentru a înregistra o corecție."
+            )));
+        }
+    }
     // Remove GL first (idempotent)
     sqlx::query(
         "DELETE FROM gl_journal WHERE company_id=?1 AND source_type='AVANS_TREZORERIE' AND source_id=?2",

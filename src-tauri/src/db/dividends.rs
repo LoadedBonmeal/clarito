@@ -427,6 +427,26 @@ pub async fn update_beneficiary(
 }
 
 pub async fn delete(pool: &SqlitePool, id: &str, company_id: &str) -> AppResult<()> {
+    // Period-lock guard (OMFP 2634/2015 immutability; QA follow-up to the v0.7.4 audit):
+    // deleting a dividend drops its DIVIDEND journal (117/457/446); if that month is FILED
+    // (locked), declared figures would change silently. Refuse when ANY month is locked.
+    let months: Vec<String> = sqlx::query_scalar(
+        "SELECT DISTINCT substr(transaction_date,1,7) FROM gl_journal \
+         WHERE company_id=?1 AND source_type='DIVIDEND' AND source_id=?2",
+    )
+    .bind(company_id)
+    .bind(id)
+    .fetch_all(pool)
+    .await?;
+    for ym in &months {
+        if crate::db::period_locks::is_period_locked(pool, company_id, ym).await? {
+            return Err(AppError::Validation(format!(
+                "Perioada {ym} este blocată (declarație depusă) — dividendul nu poate fi șters. \
+                 Deblocați perioada pentru a înregistra o corecție."
+            )));
+        }
+    }
+
     let res = sqlx::query("DELETE FROM dividends WHERE id = ?1 AND company_id = ?2")
         .bind(id)
         .bind(company_id)
