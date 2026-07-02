@@ -2135,6 +2135,26 @@ pub async fn delete_manual_journal(
     company_id: &str,
     source_id: &str,
 ) -> AppResult<u64> {
+    // Wave 4 (v0.7.4 audit) — period-lock guard (OMFP 2634/2015 immutability): deleting a manual
+    // note from a FILED (locked) month would silently change declared figures. Mirrors the post
+    // guard in `post_manual_journal`. Fail-closed: a DB error propagates instead of allowing.
+    let tx_date: Option<String> = sqlx::query_scalar(
+        "SELECT transaction_date FROM gl_journal \
+         WHERE company_id=?1 AND source_type='MANUAL' AND source_id=?2 LIMIT 1",
+    )
+    .bind(company_id)
+    .bind(source_id)
+    .fetch_optional(pool)
+    .await?;
+    if let Some(ym) = tx_date.as_deref().and_then(|d| d.get(..7)) {
+        if crate::db::period_locks::is_period_locked(pool, company_id, ym).await? {
+            return Err(crate::error::AppError::Validation(format!(
+                "Perioada {ym} este blocată (declarație depusă) — nota contabilă nu poate fi ștearsă. \
+                 Deblocați perioada pentru a înregistra o corecție."
+            )));
+        }
+    }
+
     let res = sqlx::query(
         "DELETE FROM gl_journal WHERE company_id=?1 AND source_type='MANUAL' AND source_id=?2",
     )
@@ -2691,6 +2711,17 @@ pub async fn post_fiscal_receipt_settle(
     .ok_or(crate::error::AppError::NotFound)?;
 
     let report_date: String = r.try_get("report_date").unwrap_or_default();
+    // Wave 4 (v0.7.4 audit) — period-lock guard (OMFP 2634/2015 immutability): the POS settlement
+    // posts into the Z-report's month; never post into a FILED (locked) period. Mirrors
+    // post_fiscal_receipt.
+    if let Some(ym) = report_date.get(..7) {
+        if crate::db::period_locks::is_period_locked(pool, company_id, ym).await? {
+            return Err(crate::error::AppError::Validation(format!(
+                "Perioada {ym} este blocată (declarație depusă) — decontul POS nu poate fi postat. \
+                 Deblocați perioada pentru a înregistra o corecție."
+            )));
+        }
+    }
     let card = dec(&r.try_get::<String, _>("card").unwrap_or_default());
     let serie_casa: String = r.try_get("serie_casa").unwrap_or_default();
     let nr_z: i64 = r.try_get("nr_z").unwrap_or(0);
@@ -2812,6 +2843,58 @@ pub async fn post_fiscal_receipt_settle(
     for entry in &entries {
         insert_entry(&mut tx, &journal_pk, entry).await?;
     }
+    tx.commit().await?;
+
+    Ok(())
+}
+
+/// Stornează jurnalele GL ale unui bon fiscal POSTED (FISCAL_RECEIPT + FISCAL_RECEIPT_SETTLE).
+///
+/// Wave 4 (v0.7.4 audit) — period-lock guard (OMFP 2634/2015 immutability): stornarea șterge
+/// jurnalele din luna raportului Z; dacă acea lună este blocată (declarație depusă), cifrele
+/// declarate s-ar modifica silențios. Refuză cu eroare de validare; deblocați perioada pentru
+/// a înregistra o corecție. Apelată de comanda `set_fiscal_receipt_status` (POSTED → STORNAT).
+pub async fn storno_fiscal_receipt(
+    pool: &SqlitePool,
+    company_id: &str,
+    receipt_id: &str,
+) -> AppResult<()> {
+    let report_date: Option<String> = sqlx::query_scalar(
+        "SELECT report_date FROM fiscal_receipts WHERE id = ?1 AND company_id = ?2",
+    )
+    .bind(receipt_id)
+    .bind(company_id)
+    .fetch_optional(pool)
+    .await?;
+    let report_date = report_date.ok_or(crate::error::AppError::NotFound)?;
+
+    if let Some(ym) = report_date.get(..7) {
+        if crate::db::period_locks::is_period_locked(pool, company_id, ym).await? {
+            return Err(crate::error::AppError::Validation(format!(
+                "Perioada {ym} este blocată (declarație depusă) — bonul fiscal nu poate fi stornat. \
+                 Deblocați perioada pentru a înregistra o corecție."
+            )));
+        }
+    }
+
+    // Șterge jurnalul veniturilor + decontul POS (CASCADE pe gl_entry), atomic.
+    let mut tx = pool.begin().await?;
+    sqlx::query(
+        "DELETE FROM gl_journal \
+         WHERE company_id=?1 AND source_type='FISCAL_RECEIPT' AND source_id=?2",
+    )
+    .bind(company_id)
+    .bind(receipt_id)
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query(
+        "DELETE FROM gl_journal \
+         WHERE company_id=?1 AND source_type='FISCAL_RECEIPT_SETTLE' AND source_id=?2",
+    )
+    .bind(company_id)
+    .bind(receipt_id)
+    .execute(&mut *tx)
+    .await?;
     tx.commit().await?;
 
     Ok(())
@@ -3409,6 +3492,9 @@ pub async fn generate_gl_entries(
     }
 
     // ── 3. Plăți clienți ─────────────────────────────────────────────────────
+    // Wave 4 (v0.7.4 audit): exclude DRAFT/REJECTED invoices — the sales posting (step 1) only
+    // books VALIDATED/STORNED, so a payment on a later-REJECTED invoice would credit 4111 with
+    // no matching sales journal (mirrors the `ri.status != 'REJECTED'` filter on supplier payments).
 
     let payment_rows = sqlx::query(
         "SELECT p.id, p.invoice_id, p.paid_at, p.amount, p.method, \
@@ -3422,7 +3508,8 @@ pub async fn generate_gl_entries(
          LEFT JOIN contacts c ON c.id = i.contact_id \
          WHERE p.company_id = ?1 \
            AND substr(p.paid_at,1,10) >= ?2 \
-           AND substr(p.paid_at,1,10) <= ?3",
+           AND substr(p.paid_at,1,10) <= ?3 \
+           AND i.status NOT IN ('DRAFT','REJECTED')",
     )
     .bind(company_id)
     .bind(period_from)
@@ -7092,6 +7179,52 @@ mod tests {
         assert_eq!(td, tc, "Plata: dezechilibru GL");
     }
 
+    // ── Test 3c (Wave 4 audit): plată pe factură REJECTED → NU se postează ────
+    /// Vânzările postează doar VALIDATED/STORNED; o plată pe o factură ulterior REJECTED
+    /// ar credita 4111 fără jurnal de vânzări pereche. Query-ul plăților trebuie să
+    /// excludă DRAFT/REJECTED (oglinda filtrului `ri.status != 'REJECTED'` de la furnizori).
+    #[tokio::test]
+    async fn test3c_payment_on_rejected_invoice_not_posted() {
+        let pool = setup_pool().await;
+        let cid = "co3c";
+        insert_company(&pool, cid).await;
+        insert_contact(&pool, cid, "ct3c", "CUI3C").await;
+        insert_invoice(
+            &pool, cid, "inv3c", "ct3c", "REJECTED", "1000", "190", "1190", None,
+        )
+        .await;
+
+        sqlx::query(
+            "INSERT INTO payments (id, invoice_id, company_id, amount, currency, paid_at, method) \
+             VALUES ('pay3c','inv3c',?1,'500','RON','2025-01-20','transfer')",
+        )
+        .bind(cid)
+        .execute(&pool)
+        .await
+        .expect("insert payment");
+
+        generate_gl_entries(&pool, cid, "2025-01-01", "2025-01-31", false)
+            .await
+            .expect("generate");
+
+        // No PAYMENT journal at all → no orphan C 4111 without a matching sales journal.
+        let journals: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM gl_journal \
+             WHERE company_id=?1 AND source_type='PAYMENT' AND source_id='pay3c'",
+        )
+        .bind(cid)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(journals, 0, "payment on a REJECTED invoice must not post");
+
+        let (_, c4111) = source_account(&pool, cid, "pay3c", "4111").await;
+        assert!(
+            c4111.is_zero(),
+            "no 4111 credit for a payment on a REJECTED invoice"
+        );
+    }
+
     // ── Test 3b: Plată în valută — conversie la cursul facturii ───────────────
     /// O plată în EUR trebuie convertită în RON la cursul facturii (nu postată ca
     /// sumă brută în EUR, ca și cum ar fi RON). 119 EUR × 5.0 = 595 RON.
@@ -9792,6 +9925,109 @@ mod tests {
         let _ = fake_line; // suppress unused warning
         assert!(validate_pay_means("CASH").is_ok());
         assert!(validate_pay_means("TRANSFER").is_err());
+    }
+
+    // ── Wave 4 audit: fiscal-receipt storno / POS settle refused in a LOCKED month ──
+
+    #[tokio::test]
+    async fn fiscal_storno_refused_on_locked_period() {
+        let pool = setup_pool().await;
+        insert_company(&pool, "cw4").await;
+        insert_fiscal_receipt(
+            &pool,
+            "cw4",
+            "zw4",
+            "2026-06-01",
+            "1000.00",
+            "1000.00",
+            "0.00",
+        )
+        .await;
+        insert_receipt_vat_line(&pool, "zw4", "21", "826.45", "173.55").await;
+        post_fiscal_receipt(&pool, "cw4", "zw4").await.unwrap();
+
+        // Lock the Z-report's month (a declaration was filed for 2026-06).
+        crate::db::period_locks::lock_period(
+            &pool,
+            "cw4",
+            "2026-06",
+            "declaration:D300",
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+
+        let r = storno_fiscal_receipt(&pool, "cw4", "zw4").await;
+        assert!(
+            matches!(r, Err(crate::error::AppError::Validation(_))),
+            "storno in a locked month must be a Validation error, got {r:?}"
+        );
+        // The FISCAL_RECEIPT journal must survive the refused storno.
+        let (d5311, _) = fiscal_account(&pool, "cw4", "FISCAL_RECEIPT", "zw4", "5311").await;
+        assert_eq!(d5311, dec("1000.00"), "journal untouched after refusal");
+
+        // Unlock → storno succeeds and both journal types are gone.
+        crate::db::period_locks::unlock_period(&pool, "cw4", "2026-06")
+            .await
+            .unwrap();
+        storno_fiscal_receipt(&pool, "cw4", "zw4").await.unwrap();
+        let cnt: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM gl_journal WHERE company_id='cw4' \
+             AND source_type IN ('FISCAL_RECEIPT','FISCAL_RECEIPT_SETTLE') AND source_id='zw4'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            cnt, 0,
+            "storno removes FISCAL_RECEIPT + FISCAL_RECEIPT_SETTLE"
+        );
+    }
+
+    #[tokio::test]
+    async fn fiscal_settle_refused_on_locked_period() {
+        let pool = setup_pool().await;
+        insert_company(&pool, "cw5").await;
+        insert_fiscal_receipt(
+            &pool,
+            "cw5",
+            "zw5",
+            "2026-06-02",
+            "1000.00",
+            "0.00",
+            "1000.00",
+        )
+        .await;
+        insert_receipt_vat_line(&pool, "zw5", "21", "826.45", "173.55").await;
+        post_fiscal_receipt(&pool, "cw5", "zw5").await.unwrap();
+
+        crate::db::period_locks::lock_period(
+            &pool,
+            "cw5",
+            "2026-06",
+            "declaration:D300",
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+
+        let r = post_fiscal_receipt_settle(&pool, "cw5", "zw5", Decimal::ZERO).await;
+        assert!(
+            matches!(r, Err(crate::error::AppError::Validation(_))),
+            "POS settle in a locked month must be a Validation error, got {r:?}"
+        );
+
+        // Unlock → settle succeeds.
+        crate::db::period_locks::unlock_period(&pool, "cw5", "2026-06")
+            .await
+            .unwrap();
+        post_fiscal_receipt_settle(&pool, "cw5", "zw5", Decimal::ZERO)
+            .await
+            .unwrap();
+        let (d5121, _) = fiscal_account(&pool, "cw5", "FISCAL_RECEIPT_SETTLE", "zw5", "5121").await;
+        assert_eq!(d5121, dec("1000.00"));
     }
 
     // ── partner_cui propagation tests ────────────────────────────────────────────

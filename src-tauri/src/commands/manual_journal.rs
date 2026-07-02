@@ -433,6 +433,70 @@ mod tests {
         assert_eq!(after_e, 0, "gl_entry șterse prin CASCADE (FK ON)");
     }
 
+    // ── Test 3b (Wave 4 audit): delete refuzat când luna notei este BLOCATĂ ───
+
+    #[tokio::test]
+    async fn delete_refused_on_locked_period() {
+        let pool = setup_pool().await;
+        insert_company(&pool, "co1").await;
+
+        let src = new_id();
+        post_manual_journal(
+            &pool,
+            &ManualJournal {
+                company_id: "co1",
+                journal_id: "NC",
+                journal_type: "MANUAL",
+                source_type: "MANUAL",
+                source_id: &src,
+                date: "2026-06-10",
+                description: "În lună blocată",
+                partner_cui: None,
+            },
+            &[
+                ("5311", rdec!(200), Decimal::ZERO),
+                ("7588", Decimal::ZERO, rdec!(200)),
+            ],
+        )
+        .await
+        .expect("post OK");
+
+        // Blocăm luna notei (declarație depusă pentru 2026-06).
+        crate::db::period_locks::lock_period(
+            &pool,
+            "co1",
+            "2026-06",
+            "declaration:D300",
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+
+        let r = db_delete_journal(&pool, "co1", &src).await;
+        assert!(
+            matches!(r, Err(crate::error::AppError::Validation(_))),
+            "delete într-o lună blocată trebuie refuzat cu Validation, got {r:?}"
+        );
+        // Nota trebuie să existe în continuare.
+        let cnt: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM gl_journal \
+             WHERE company_id='co1' AND source_type='MANUAL' AND source_id=?1",
+        )
+        .bind(&src)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(cnt, 1, "nota supraviețuiește ștergerii refuzate");
+
+        // Deblocare → ștergerea reușește.
+        crate::db::period_locks::unlock_period(&pool, "co1", "2026-06")
+            .await
+            .unwrap();
+        let rows = db_delete_journal(&pool, "co1", &src).await.unwrap();
+        assert_eq!(rows, 1u64);
+    }
+
     // ── Test 4: cont inexistent → validate_line_account respinge ──────────────
 
     #[tokio::test]

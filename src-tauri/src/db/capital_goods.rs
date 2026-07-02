@@ -363,23 +363,59 @@ pub async fn period_adjustment_lei_range(
 }
 
 pub async fn delete(pool: &SqlitePool, id: &str, company_id: &str) -> AppResult<()> {
-    let res = sqlx::query("DELETE FROM capital_goods WHERE id=?1 AND company_id=?2")
-        .bind(id)
-        .bind(company_id)
-        .execute(pool)
-        .await?;
-    if res.rows_affected() == 0 {
-        return Err(AppError::NotFound);
-    }
-    // Clean up GL journals for this good's adjustments (CASCADE removes the ledger rows themselves).
-    sqlx::query(
-        "DELETE FROM gl_journal WHERE company_id=?1 AND source_type='CAPGOOD_ADJ' AND source_id IN \
-         (SELECT id FROM capital_good_adjustments WHERE capital_good_id=?2)",
+    // Wave 4 (v0.7.4 audit) — period-lock guard (OMFP 2634/2015 immutability): deleting a capital
+    // good drops the CAPGOOD_ADJ journals of its art. 305 adjustments (and the registry rows via
+    // CASCADE); if any of those months is FILED (locked), declared figures (GL + D300 R31_2)
+    // would change silently. Must run BEFORE the entity DELETE — the adjustments cascade away
+    // with it. Fail-closed via `?`.
+    let months: Vec<String> = sqlx::query_scalar(
+        "SELECT DISTINCT substr(transaction_date,1,7) FROM gl_journal \
+         WHERE company_id=?1 AND source_type='CAPGOOD_ADJ' AND source_id IN \
+           (SELECT id FROM capital_good_adjustments WHERE capital_good_id=?2)",
     )
     .bind(company_id)
     .bind(id)
-    .execute(pool)
+    .fetch_all(pool)
     .await?;
+    for ym in &months {
+        if crate::db::period_locks::is_period_locked(pool, company_id, ym).await? {
+            return Err(AppError::Validation(format!(
+                "Perioada {ym} este blocată (declarație depusă) — bunul de capital nu poate fi \
+                 șters. Deblocați perioada pentru a înregistra o corecție."
+            )));
+        }
+    }
+
+    // Existence check up front (company-scoped) so NotFound is decided before touching anything.
+    let exists: Option<i64> =
+        sqlx::query_scalar("SELECT 1 FROM capital_goods WHERE id=?1 AND company_id=?2 LIMIT 1")
+            .bind(id)
+            .bind(company_id)
+            .fetch_optional(pool)
+            .await?;
+    if exists.is_none() {
+        return Err(AppError::NotFound);
+    }
+
+    // Wave 4 (v0.7.4 audit) — the journal cleanup must run while the adjustment rows still exist:
+    // capital_good_adjustments has ON DELETE CASCADE on capital_good_id, so running the subselect
+    // AFTER the entity DELETE matched nothing and orphaned the CAPGOOD_ADJ journals forever.
+    // Journals + entity go in one transaction (adjustment registry rows cascade with the entity).
+    let mut tx = pool.begin().await?;
+    sqlx::query(
+        "DELETE FROM gl_journal WHERE company_id=?1 AND source_type='CAPGOOD_ADJ' AND source_id IN \
+         (SELECT id FROM capital_good_adjustments WHERE company_id=?1 AND capital_good_id=?2)",
+    )
+    .bind(company_id)
+    .bind(id)
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query("DELETE FROM capital_goods WHERE id=?1 AND company_id=?2")
+        .bind(id)
+        .bind(company_id)
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
     Ok(())
 }
 
@@ -596,5 +632,65 @@ mod tests {
         ));
         assert!(list(&pool, "intrus").await.unwrap().is_empty());
         assert!(delete(&pool, &g.id, "co").await.is_ok());
+    }
+
+    // ── Wave 4 audit: delete refused while an adjustment journal's month is LOCKED ──
+
+    #[tokio::test]
+    async fn delete_refused_on_locked_period() {
+        let pool = pool().await;
+        let g = create(&pool, input()).await.unwrap(); // immovable N=20, vat 210000, init 100%
+                                                       // Clawback posted in 2028-12 (CAPGOOD_ADJ journal dated 2028-12-31).
+        record_adjustment(
+            &pool,
+            RecordAdjustmentInput {
+                company_id: "co".into(),
+                capital_good_id: g.id.clone(),
+                year: 3,
+                new_deduction_pct: 0.0,
+                period: "2028-12".into(),
+                notes: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        crate::db::period_locks::lock_period(
+            &pool,
+            "co",
+            "2028-12",
+            "declaration:D300",
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+
+        let r = delete(&pool, &g.id, "co").await;
+        assert!(
+            matches!(r, Err(AppError::Validation(_))),
+            "delete with a locked CAPGOOD_ADJ month must be a Validation error, got {r:?}"
+        );
+        // Entity, registry row, and journal must be untouched.
+        assert!(fetch(&pool, &g.id, "co").await.is_ok());
+        assert_eq!(list_adjustments(&pool, &g.id, "co").await.unwrap().len(), 1);
+        let n: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM gl_journal WHERE source_type='CAPGOOD_ADJ'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(n, 1, "CAPGOOD_ADJ journal must survive the refused delete");
+
+        // Unlock → delete succeeds and the journal is gone.
+        crate::db::period_locks::unlock_period(&pool, "co", "2028-12")
+            .await
+            .unwrap();
+        delete(&pool, &g.id, "co").await.unwrap();
+        let n_after: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM gl_journal WHERE source_type='CAPGOOD_ADJ'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(n_after, 0);
     }
 }

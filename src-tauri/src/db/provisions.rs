@@ -215,6 +215,27 @@ pub async fn reverse(
 }
 
 pub async fn delete(pool: &SqlitePool, id: &str, company_id: &str) -> AppResult<()> {
+    // Wave 4 (v0.7.4 audit) — period-lock guard (OMFP 2634/2015 immutability): deleting a
+    // provision drops its PROVISION + PROVISION_REVERSE journals; if any of those months is
+    // FILED (locked), declared figures would change silently. Fail-closed via `?`.
+    let months: Vec<String> = sqlx::query_scalar(
+        "SELECT DISTINCT substr(transaction_date,1,7) FROM gl_journal \
+         WHERE company_id=?1 AND source_type IN ('PROVISION','PROVISION_REVERSE') \
+           AND source_id=?2",
+    )
+    .bind(company_id)
+    .bind(id)
+    .fetch_all(pool)
+    .await?;
+    for ym in &months {
+        if crate::db::period_locks::is_period_locked(pool, company_id, ym).await? {
+            return Err(AppError::Validation(format!(
+                "Perioada {ym} este blocată (declarație depusă) — provizionul nu poate fi șters. \
+                 Deblocați perioada pentru a înregistra o corecție."
+            )));
+        }
+    }
+
     let res = sqlx::query("DELETE FROM provisions WHERE id=?1 AND company_id=?2")
         .bind(id)
         .bind(company_id)
@@ -330,5 +351,48 @@ mod tests {
         ));
         assert!(list(&pool, "intrus").await.unwrap().is_empty());
         assert!(delete(&pool, &p.id, "co").await.is_ok());
+    }
+
+    // ── Wave 4 audit: delete refused while any journal month is LOCKED ────────
+
+    #[tokio::test]
+    async fn delete_refused_on_locked_period() {
+        let pool = pool().await;
+        // input(): created_period 2026-06 → PROVISION journal dated 2026-06-30.
+        let p = create(&pool, input()).await.unwrap();
+        // Reverse in 2026-09 → a second journal (PROVISION_REVERSE) in another month.
+        reverse(&pool, &p.id, "co", "2026-09").await.unwrap();
+
+        // Lock ONLY the reversal month — ANY locked journal month must refuse the delete.
+        crate::db::period_locks::lock_period(
+            &pool,
+            "co",
+            "2026-09",
+            "declaration:D300",
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+
+        let r = delete(&pool, &p.id, "co").await;
+        assert!(
+            matches!(r, Err(AppError::Validation(_))),
+            "delete with a locked PROVISION_REVERSE month must be a Validation error, got {r:?}"
+        );
+        // Entity + journals must be untouched.
+        assert!(fetch(&pool, &p.id, "co").await.is_ok());
+        let (d, _) = jt(&pool, "PROVISION").await;
+        assert_eq!(d, Decimal::from_str("10000.00").unwrap());
+
+        // Unlock → delete succeeds and both journals are gone.
+        crate::db::period_locks::unlock_period(&pool, "co", "2026-09")
+            .await
+            .unwrap();
+        delete(&pool, &p.id, "co").await.unwrap();
+        let (d1, _) = jt(&pool, "PROVISION").await;
+        let (d2, _) = jt(&pool, "PROVISION_REVERSE").await;
+        assert_eq!(d1, Decimal::ZERO);
+        assert_eq!(d2, Decimal::ZERO);
     }
 }

@@ -59,6 +59,24 @@ pub async fn create(
     create_in(&mut conn, input).await
 }
 
+/// Period-lock check pe o CONEXIUNE existentă (`period_locks::is_period_locked` cere un pool;
+/// `create_in` rulează și în tranzacția lui `match_bank_txn`). Fail-closed: o eroare DB se
+/// propagă (nu se tratează drept „deblocat").
+async fn is_period_locked_in(
+    conn: &mut sqlx::SqliteConnection,
+    company_id: &str,
+    period: &str,
+) -> AppResult<bool> {
+    let row: Option<i64> = sqlx::query_scalar(
+        "SELECT 1 FROM period_locks WHERE company_id = ?1 AND period = ?2 LIMIT 1",
+    )
+    .bind(company_id)
+    .bind(period)
+    .fetch_optional(&mut *conn)
+    .await?;
+    Ok(row.is_some())
+}
+
 /// Variantă pe conexiune/tranzacție EXISTENTĂ a lui [`create`] — folosită de `match_bank_txn`
 /// pentru a crea plata și a marca tranzacția bancară MATCHED atomic (o singură tranzacție).
 pub async fn create_in(
@@ -73,6 +91,20 @@ pub async fn create_in(
         return Err(AppError::Validation(
             "Suma plății trebuie să fie pozitivă.".into(),
         ));
+    }
+
+    // Wave 4 (v0.7.4 audit) — period-lock guard on CREATE (the mirror of `delete`): a supplier
+    // payment booked into a FILED (locked) month never reaches the GL (generate_gl_entries
+    // refuses locked periods) yet could not be deleted either → a stuck row silently diverging
+    // from the filed declaration (incl. the cash-VAT deduction release). Covers
+    // add_received_payment AND match_bank_txn (both go through create_in).
+    let period = input.paid_at.get(..7).unwrap_or("");
+    if !period.is_empty() && is_period_locked_in(&mut *conn, &input.company_id, period).await? {
+        return Err(AppError::Validation(format!(
+            "Perioada {period} este blocată (declarație depusă) — plata nu poate fi înregistrată. \
+             Înregistrați plata într-o perioadă deschisă sau deblocați perioada și depuneți o \
+             declarație rectificativă."
+        )));
     }
 
     // Verify the received invoice belongs to the company AND default the payment currency to
@@ -410,6 +442,47 @@ mod tests {
             .unwrap();
         delete(&pool, &p.id, "co").await.unwrap();
         assert!(get_by_id(&pool, &p.id, "co").await.is_err());
+    }
+
+    // ── Wave 4 audit: CREATE refused when the payment's month is LOCKED ──────
+
+    #[tokio::test]
+    async fn create_received_payment_refused_on_locked_period() {
+        let pool = pool().await;
+        seed(&pool).await;
+
+        // Lock 2026-03 (a declaration was filed for that month).
+        crate::db::period_locks::lock_period(
+            &pool,
+            "co",
+            "2026-03",
+            "declaration:D300",
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+
+        // Payment dated in the locked month → refused, nothing persisted.
+        let r = create(&pool, input("500", "2026-03-20")).await;
+        assert!(
+            matches!(r, Err(AppError::Validation(_))),
+            "create in a locked month must be a Validation error, got {r:?}"
+        );
+        let cnt: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM received_invoice_payments WHERE company_id = 'co'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(cnt, 0, "no payment row persisted for a locked month");
+
+        // An open month succeeds while the lock holds; unlocking reopens the month.
+        create(&pool, input("100", "2026-04-05")).await.unwrap();
+        crate::db::period_locks::unlock_period(&pool, "co", "2026-03")
+            .await
+            .unwrap();
+        create(&pool, input("500", "2026-03-20")).await.unwrap();
     }
 
     // ── FIX 2: delete_received_payment cleans its GL journal ─────────────────

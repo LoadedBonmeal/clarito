@@ -152,23 +152,10 @@ pub async fn set_fiscal_receipt_status(
                 .await?;
         }
         ("POSTED", "STORNAT") => {
-            // Storno: șterge jurnalul GL (CASCADE pe gl_entry)
-            sqlx::query(
-                "DELETE FROM gl_journal \
-                 WHERE company_id=?1 AND source_type='FISCAL_RECEIPT' AND source_id=?2",
-            )
-            .bind(&company_id)
-            .bind(&id)
-            .execute(&state.db)
-            .await?;
-            sqlx::query(
-                "DELETE FROM gl_journal \
-                 WHERE company_id=?1 AND source_type='FISCAL_RECEIPT_SETTLE' AND source_id=?2",
-            )
-            .bind(&company_id)
-            .bind(&id)
-            .execute(&state.db)
-            .await?;
+            // Storno: șterge jurnalul GL (CASCADE pe gl_entry).
+            // Wave 4 (v0.7.4 audit): gl::storno_fiscal_receipt include guardul de period-lock
+            // (OMFP 2634/2015) — refuză dacă luna raportului Z este blocată (declarație depusă).
+            gl::storno_fiscal_receipt(&state.db, &company_id, &id).await?;
             sqlx::query(
                 "UPDATE fiscal_receipts SET status='STORNAT' WHERE id=?1 AND company_id=?2",
             )

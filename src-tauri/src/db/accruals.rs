@@ -177,6 +177,26 @@ pub async fn list(pool: &SqlitePool, company_id: &str) -> AppResult<Vec<Accrual>
 }
 
 pub async fn delete(pool: &SqlitePool, id: &str, company_id: &str) -> AppResult<()> {
+    // Wave 4 (v0.7.4 audit) — period-lock guard (OMFP 2634/2015 immutability): deleting an accrual
+    // drops its ACCRUAL_DEFER journal; if that journal's month is FILED (locked), declared figures
+    // would change silently. Refuse when ANY affected month is locked (fail-closed via `?`).
+    let months: Vec<String> = sqlx::query_scalar(
+        "SELECT DISTINCT substr(transaction_date,1,7) FROM gl_journal \
+         WHERE company_id=?1 AND source_type='ACCRUAL_DEFER' AND source_id=?2",
+    )
+    .bind(company_id)
+    .bind(id)
+    .fetch_all(pool)
+    .await?;
+    for ym in &months {
+        if crate::db::period_locks::is_period_locked(pool, company_id, ym).await? {
+            return Err(AppError::Validation(format!(
+                "Perioada {ym} este blocată (declarație depusă) — înregistrarea în avans nu poate \
+                 fi ștearsă. Deblocați perioada pentru a înregistra o corecție."
+            )));
+        }
+    }
+
     let res = sqlx::query("DELETE FROM accruals WHERE id=?1 AND company_id=?2")
         .bind(id)
         .bind(company_id)
@@ -341,5 +361,42 @@ mod tests {
         ));
         assert!(list(&pool, "intrus").await.unwrap().is_empty());
         assert!(delete(&pool, &a.id, "co").await.is_ok());
+    }
+
+    // ── Wave 4 audit: delete refused while the deferral journal's month is LOCKED ──
+
+    #[tokio::test]
+    async fn delete_refused_on_locked_period() {
+        let pool = pool().await;
+        // input(): start_period 2026-01 → ACCRUAL_DEFER journal dated 2026-01-01.
+        let a = create(&pool, input()).await.unwrap();
+        crate::db::period_locks::lock_period(
+            &pool,
+            "co",
+            "2026-01",
+            "declaration:D300",
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+
+        let r = delete(&pool, &a.id, "co").await;
+        assert!(
+            matches!(r, Err(AppError::Validation(_))),
+            "delete with a locked ACCRUAL_DEFER month must be a Validation error, got {r:?}"
+        );
+        // Entity + journal must be untouched.
+        assert!(fetch(&pool, &a.id, "co").await.is_ok());
+        let (d, _) = journal_total(&pool, "ACCRUAL_DEFER").await;
+        assert_eq!(d, Decimal::from_str("1200.00").unwrap());
+
+        // Unlock → delete succeeds and the journal is gone.
+        crate::db::period_locks::unlock_period(&pool, "co", "2026-01")
+            .await
+            .unwrap();
+        delete(&pool, &a.id, "co").await.unwrap();
+        let (d_after, _) = journal_total(&pool, "ACCRUAL_DEFER").await;
+        assert_eq!(d_after, Decimal::ZERO);
     }
 }
